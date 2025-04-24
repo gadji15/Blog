@@ -3,6 +3,9 @@ import {
   content, type Content, type InsertContent,
   progress, type Progress, type InsertProgress,
   favorites, type Favorite, type InsertFavorite,
+  subscriptionPlans, type SubscriptionPlan, type InsertSubscriptionPlan,
+  subscriptions, type Subscription, type InsertSubscription,
+  payments, type Payment, type InsertPayment,
   contentSchema 
 } from "@shared/schema";
 import { db } from "./db";
@@ -20,6 +23,8 @@ export interface IStorage {
   getUserByUsername(username: string): Promise<User | undefined>;
   createUser(user: InsertUser): Promise<User>;
   updateUserLanguage(userId: number, language: string): Promise<User | undefined>;
+  updateUserVipStatus(userId: number, isVip: boolean, vipExpiresAt?: Date): Promise<User | undefined>;
+  updateUserPreferredQuality(userId: number, preferredQuality: string): Promise<User | undefined>;
   
   // Content related methods
   getAllContent(): Promise<Content[]>;
@@ -31,6 +36,7 @@ export interface IStorage {
   getPopularSeries(): Promise<Content[]>;
   getLatestMovies(): Promise<Content[]>;
   searchContent(query: string): Promise<Content[]>;
+  getExclusiveContent(): Promise<Content[]>;
 
   // User progress related methods
   getUserProgress(userId: number): Promise<Progress[]>;
@@ -40,6 +46,24 @@ export interface IStorage {
   getUserFavorites(userId: number): Promise<Content[]>;
   addToFavorites(favorite: InsertFavorite): Promise<void>;
   removeFromFavorites(userId: number, contentId: number): Promise<void>;
+  
+  // Subscription plan related methods
+  getAllSubscriptionPlans(): Promise<SubscriptionPlan[]>;
+  getSubscriptionPlanById(id: number): Promise<SubscriptionPlan | undefined>;
+  createSubscriptionPlan(plan: InsertSubscriptionPlan): Promise<SubscriptionPlan>;
+  updateSubscriptionPlan(id: number, data: Partial<InsertSubscriptionPlan>): Promise<SubscriptionPlan>;
+  deleteSubscriptionPlan(id: number): Promise<void>;
+  
+  // User subscription related methods
+  getUserSubscription(userId: number): Promise<Subscription | undefined>;
+  createSubscription(subscription: InsertSubscription): Promise<Subscription>;
+  updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<Subscription>;
+  cancelSubscription(id: number): Promise<void>;
+  
+  // Payment related methods
+  getUserPayments(userId: number): Promise<Payment[]>;
+  createPayment(payment: InsertPayment): Promise<Payment>;
+  updatePaymentStatus(id: number, status: string, transactionId?: string): Promise<Payment>;
   
   // For user sessions
   sessionStore: session.Store;
@@ -78,6 +102,27 @@ export class DatabaseStorage implements IStorage {
     const [user] = await db
       .update(users)
       .set({ language })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+  
+  async updateUserVipStatus(userId: number, isVip: boolean, vipExpiresAt?: Date): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ 
+        isVip,
+        vipExpiresAt: vipExpiresAt || null
+      })
+      .where(eq(users.id, userId))
+      .returning();
+    return user;
+  }
+  
+  async updateUserPreferredQuality(userId: number, preferredQuality: string): Promise<User | undefined> {
+    const [user] = await db
+      .update(users)
+      .set({ preferredQuality })
       .where(eq(users.id, userId))
       .returning();
     return user;
@@ -204,6 +249,17 @@ export class DatabaseStorage implements IStorage {
           )`
         )
       );
+    
+    return results.map(this.mapContentFromDb);
+  }
+  
+  async getExclusiveContent(): Promise<Content[]> {
+    const results = await db
+      .select()
+      .from(content)
+      .where(eq(content.isExclusive, true))
+      .orderBy(sql`RANDOM()`)
+      .limit(8);
     
     return results.map(this.mapContentFromDb);
   }
@@ -335,6 +391,179 @@ export class DatabaseStorage implements IStorage {
       .delete(content)
       .where(eq(content.id, contentId));
   }
+  
+  // Subscription plan related methods
+  async getAllSubscriptionPlans(): Promise<SubscriptionPlan[]> {
+    const plans = await db
+      .select()
+      .from(subscriptionPlans)
+      .orderBy(subscriptionPlans.price);
+    
+    return plans;
+  }
+  
+  async getSubscriptionPlanById(id: number): Promise<SubscriptionPlan | undefined> {
+    const [plan] = await db
+      .select()
+      .from(subscriptionPlans)
+      .where(eq(subscriptionPlans.id, id));
+    
+    return plan;
+  }
+  
+  async createSubscriptionPlan(plan: InsertSubscriptionPlan): Promise<SubscriptionPlan> {
+    const [newPlan] = await db
+      .insert(subscriptionPlans)
+      .values(plan)
+      .returning();
+    
+    return newPlan;
+  }
+  
+  async updateSubscriptionPlan(id: number, data: Partial<InsertSubscriptionPlan>): Promise<SubscriptionPlan> {
+    const [updatedPlan] = await db
+      .update(subscriptionPlans)
+      .set(data)
+      .where(eq(subscriptionPlans.id, id))
+      .returning();
+    
+    return updatedPlan;
+  }
+  
+  async deleteSubscriptionPlan(id: number): Promise<void> {
+    await db
+      .delete(subscriptionPlans)
+      .where(eq(subscriptionPlans.id, id));
+  }
+  
+  // User subscription related methods
+  async getUserSubscription(userId: number): Promise<Subscription | undefined> {
+    const [subscription] = await db
+      .select()
+      .from(subscriptions)
+      .where(
+        and(
+          eq(subscriptions.userId, userId),
+          eq(subscriptions.isActive, true)
+        )
+      );
+    
+    return subscription;
+  }
+  
+  async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
+    const [newSubscription] = await db
+      .insert(subscriptions)
+      .values(subscription)
+      .returning();
+    
+    // Update the user's VIP status
+    await this.updateUserVipStatus(
+      subscription.userId, 
+      true, 
+      subscription.endDate
+    );
+    
+    return newSubscription;
+  }
+  
+  async updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<Subscription> {
+    const [updatedSubscription] = await db
+      .update(subscriptions)
+      .set(data)
+      .where(eq(subscriptions.id, id))
+      .returning();
+    
+    // If updating isActive status to false, also update user VIP status
+    if (data.isActive === false) {
+      await this.updateUserVipStatus(updatedSubscription.userId, false);
+    }
+    
+    return updatedSubscription;
+  }
+  
+  async cancelSubscription(id: number): Promise<void> {
+    const [subscription] = await db
+      .select()
+      .from(subscriptions)
+      .where(eq(subscriptions.id, id));
+    
+    if (subscription) {
+      await db
+        .update(subscriptions)
+        .set({ 
+          isActive: false,
+          autoRenew: false
+        })
+        .where(eq(subscriptions.id, id));
+      
+      // Update user VIP status
+      await this.updateUserVipStatus(subscription.userId, false);
+    }
+  }
+  
+  // Payment related methods
+  async getUserPayments(userId: number): Promise<Payment[]> {
+    const userPayments = await db
+      .select()
+      .from(payments)
+      .where(eq(payments.userId, userId))
+      .orderBy(payments.createdAt.desc());
+    
+    return userPayments;
+  }
+  
+  async createPayment(payment: InsertPayment): Promise<Payment> {
+    const [newPayment] = await db
+      .insert(payments)
+      .values(payment)
+      .returning();
+    
+    return newPayment;
+  }
+  
+  async updatePaymentStatus(id: number, status: string, transactionId?: string): Promise<Payment> {
+    const updateData: Partial<Payment> = { 
+      status,
+      updatedAt: new Date()
+    };
+    
+    if (transactionId) {
+      updateData.transactionId = transactionId;
+    }
+    
+    const [updatedPayment] = await db
+      .update(payments)
+      .set(updateData)
+      .where(eq(payments.id, id))
+      .returning();
+    
+    // If payment is confirmed, update subscription and VIP status
+    if (status === 'completed' && updatedPayment.subscriptionId) {
+      // Get the subscription
+      const [subscription] = await db
+        .select()
+        .from(subscriptions)
+        .where(eq(subscriptions.id, updatedPayment.subscriptionId));
+      
+      if (subscription) {
+        // Activate the subscription
+        await db
+          .update(subscriptions)
+          .set({ isActive: true })
+          .where(eq(subscriptions.id, subscription.id));
+        
+        // Update user VIP status
+        await this.updateUserVipStatus(
+          updatedPayment.userId,
+          true,
+          subscription.endDate
+        );
+      }
+    }
+    
+    return updatedPayment;
+  }
 
   // Helper method to convert database content to API content format
   private mapContentFromDb(dbContent: any): Content {
@@ -366,13 +595,59 @@ export class DatabaseStorage implements IStorage {
   // Helper method to seed the database with initial content
   private async seedDatabase() {
     // Check if content table is empty
-    const [count] = await db
+    const [contentCount] = await db
       .select({ count: sql<number>`count(*)` })
       .from(content);
     
-    if (count.count > 0) {
-      return; // Database already has content
+    // Check if subscription plans table is empty
+    const [planCount] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(subscriptionPlans);
+    
+    // Seed content if needed
+    if (contentCount.count === 0) {
+      await this.seedContentData();
     }
+    
+    // Seed subscription plans if needed
+    if (planCount.count === 0) {
+      await this.seedSubscriptionPlans();
+    }
+  }
+  
+  private async seedSubscriptionPlans() {
+    const plans = [
+      {
+        name: "Standard VIP",
+        description: "Accès à tous les contenus VIP, qualité HD, recommendations personnalisées.",
+        price: 5000, // 5000 XOF
+        duration: 30, // 30 jours
+        features: ["Contenu exclusif", "Qualité HD", "Recommendations personnalisées"],
+        isActive: true
+      },
+      {
+        name: "Premium VIP",
+        description: "Accès à tous les contenus VIP, qualité Ultra HD, téléchargements illimités, pas de publicités.",
+        price: 9000, // 9000 XOF
+        duration: 30, // 30 jours
+        features: ["Contenu exclusif", "Qualité Ultra HD", "Téléchargements illimités", "Sans publicités"],
+        isActive: true
+      },
+      {
+        name: "Famille VIP",
+        description: "Tous les avantages Premium pour jusqu'à 4 profils différents.",
+        price: 15000, // 15000 XOF
+        duration: 30, // 30 jours
+        features: ["Contenu exclusif", "Qualité Ultra HD", "Téléchargements illimités", "Sans publicités", "Jusqu'à 4 profils"],
+        isActive: true
+      }
+    ];
+    
+    // Insert plans
+    await db.insert(subscriptionPlans).values(plans);
+  }
+  
+  private async seedContentData() {
     
     // Sample content to seed the database
     const sampleContent = [

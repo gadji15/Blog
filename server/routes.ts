@@ -2,7 +2,12 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
-import { insertContentSchema } from "@shared/schema";
+import { 
+  insertContentSchema, 
+  insertSubscriptionPlanSchema,
+  insertSubscriptionSchema, 
+  insertPaymentSchema 
+} from "@shared/schema";
 
 // Middleware to check if user is authenticated
 const ensureAuthenticated = (req: Request, res: Response, next: NextFunction) => {
@@ -18,6 +23,14 @@ const ensureAdmin = (req: Request, res: Response, next: NextFunction) => {
     return next();
   }
   res.status(403).json({ message: "Forbidden" });
+};
+
+// Middleware to check if user has VIP status
+const ensureVIP = (req: Request, res: Response, next: NextFunction) => {
+  if (req.isAuthenticated() && req.user.isVip) {
+    return next();
+  }
+  res.status(403).json({ message: "VIP subscription required to access this resource" });
 };
 
 export async function registerRoutes(app: Express): Promise<Server> {
@@ -44,6 +57,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const content = await storage.getContentById(id);
       if (!content) {
         return res.status(404).json({ message: "Content not found" });
+      }
+      
+      // Si le contenu est exclusif et que l'utilisateur n'est pas VIP, masquer l'URL de la vidéo
+      if (content.isExclusive && (!req.isAuthenticated() || !req.user?.isVip)) {
+        const { videoUrl, ...contentInfo } = content;
+        return res.json({
+          ...contentInfo,
+          videoUrl: null,
+          vipRequired: true
+        });
       }
       
       res.json(content);
@@ -249,6 +272,239 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.deleteContent(contentId);
       
       res.json({ message: "Content deleted successfully" });
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  // VIP and subscription plan routes
+  app.get("/api/exclusive-content", ensureVIP, async (req, res, next) => {
+    try {
+      const exclusiveContent = await storage.getExclusiveContent();
+      res.json(exclusiveContent);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.get("/api/subscription-plans", async (req, res, next) => {
+    try {
+      const plans = await storage.getAllSubscriptionPlans();
+      res.json(plans);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.get("/api/user/subscription", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const subscription = await storage.getUserSubscription(req.user.id);
+      res.json(subscription || { active: false });
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.post("/api/subscribe", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const { planId, paymentMethod, autoRenew = false } = req.body;
+      
+      if (!planId) {
+        return res.status(400).json({ message: "Plan ID is required" });
+      }
+      
+      if (!paymentMethod) {
+        return res.status(400).json({ message: "Payment method is required" });
+      }
+      
+      // Get the subscription plan
+      const plan = await storage.getSubscriptionPlanById(planId);
+      if (!plan) {
+        return res.status(404).json({ message: "Subscription plan not found" });
+      }
+      
+      // Calculate subscription end date
+      const startDate = new Date();
+      const endDate = new Date();
+      endDate.setDate(endDate.getDate() + plan.duration);
+      
+      // Create subscription (initially inactive until payment is confirmed)
+      const subscription = await storage.createSubscription({
+        userId: req.user.id,
+        planId: plan.id,
+        startDate,
+        endDate,
+        autoRenew,
+        isActive: false
+      });
+      
+      // Create a pending payment
+      const payment = await storage.createPayment({
+        userId: req.user.id,
+        subscriptionId: subscription.id,
+        amount: plan.price,
+        currency: "XOF",
+        paymentMethod,
+        paymentDetails: req.body.paymentDetails || {},
+        status: "pending",
+        timestamp: new Date(),
+        transactionId: null
+      });
+      
+      res.status(201).json({
+        subscription,
+        payment,
+        plan
+      });
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.post("/api/payments/complete", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const { paymentId, transactionId } = req.body;
+      
+      if (!paymentId) {
+        return res.status(400).json({ message: "Payment ID is required" });
+      }
+      
+      if (!transactionId) {
+        return res.status(400).json({ message: "Transaction ID is required" });
+      }
+      
+      // Update payment status
+      const payment = await storage.updatePaymentStatus(
+        paymentId,
+        "completed",
+        transactionId
+      );
+      
+      // Get subscription
+      if (payment.subscriptionId) {
+        const subscription = await storage.getUserSubscription(req.user.id);
+        res.json({ payment, subscription });
+      } else {
+        res.json({ payment });
+      }
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.get("/api/payments", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const payments = await storage.getUserPayments(req.user.id);
+      res.json(payments);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.post("/api/cancel-subscription", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const { subscriptionId } = req.body;
+      
+      if (!subscriptionId) {
+        return res.status(400).json({ message: "Subscription ID is required" });
+      }
+      
+      await storage.cancelSubscription(subscriptionId);
+      res.json({ message: "Subscription canceled successfully" });
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  // Admin subscription plan management routes
+  app.post("/api/admin/subscription-plans", ensureAdmin, async (req, res, next) => {
+    try {
+      // Parse and validate the input using the schema
+      const planData = insertSubscriptionPlanSchema.parse(req.body);
+      
+      // Add plan to database
+      const newPlan = await storage.createSubscriptionPlan(planData);
+      
+      res.status(201).json(newPlan);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.patch("/api/admin/subscription-plans/:id", ensureAdmin, async (req, res, next) => {
+    try {
+      const planId = parseInt(req.params.id);
+      if (isNaN(planId)) {
+        return res.status(400).json({ message: "Invalid ID format" });
+      }
+      
+      // First check if plan exists
+      const existingPlan = await storage.getSubscriptionPlanById(planId);
+      if (!existingPlan) {
+        return res.status(404).json({ message: "Subscription plan not found" });
+      }
+      
+      // Update plan in database
+      const updatedPlan = await storage.updateSubscriptionPlan(planId, req.body);
+      
+      res.json(updatedPlan);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.delete("/api/admin/subscription-plans/:id", ensureAdmin, async (req, res, next) => {
+    try {
+      const planId = parseInt(req.params.id);
+      if (isNaN(planId)) {
+        return res.status(400).json({ message: "Invalid ID format" });
+      }
+      
+      // First check if plan exists
+      const existingPlan = await storage.getSubscriptionPlanById(planId);
+      if (!existingPlan) {
+        return res.status(404).json({ message: "Subscription plan not found" });
+      }
+      
+      // Delete plan from database
+      await storage.deleteSubscriptionPlan(planId);
+      
+      res.json({ message: "Subscription plan deleted successfully" });
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  app.post("/api/admin/user/vip", ensureAdmin, async (req, res, next) => {
+    try {
+      const { userId, isVip, expiresAt } = req.body;
+      
+      if (!userId) {
+        return res.status(400).json({ message: "User ID is required" });
+      }
+      
+      const user = await storage.updateUserVipStatus(
+        userId, 
+        isVip, 
+        expiresAt ? new Date(expiresAt) : undefined
+      );
+      
+      res.json(user);
+    } catch (error) {
+      next(error);
+    }
+  });
+  
+  // User preferences routes
+  app.post("/api/user/quality", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const { quality } = req.body;
+      if (!quality) {
+        return res.status(400).json({ message: "Quality preference is required" });
+      }
+      
+      const user = await storage.updateUserPreferredQuality(req.user.id, quality);
+      res.json(user);
     } catch (error) {
       next(error);
     }
