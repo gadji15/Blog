@@ -131,14 +131,14 @@ export const contentSchema = z.object({
   genres: z.array(z.string()),
   posterUrl: z.string(),
   backdropUrl: z.string(),
-  rating: z.number().min(0).max(100).optional(),
-  duration: z.number().optional(), // in minutes
-  trailerUrl: z.string().optional(),
+  rating: z.number().min(0).max(100).optional().nullable(),
+  duration: z.number().optional().nullable(), // in minutes
+  trailerUrl: z.string().optional().nullable(),
   isExclusive: z.boolean().default(false),
   isNew: z.boolean().default(false),
-  seasons: z.number().optional(), // only for series
-  videoUrl: z.string().optional(),
-  createdAt: z.date().optional(),
+  seasons: z.number().optional().nullable(), // only for series
+  videoUrl: z.string().optional().nullable(),
+  createdAt: z.date().optional().nullable(),
 });
 
 export const progressSchema = z.object({

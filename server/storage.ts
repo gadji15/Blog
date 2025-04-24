@@ -310,10 +310,36 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
+    // Admin content management methods
+  async addContent(contentData: InsertContent): Promise<Content> {
+    const [newContent] = await db
+      .insert(content)
+      .values(contentData)
+      .returning();
+    
+    return this.mapContentFromDb(newContent);
+  }
+  
+  async updateContent(contentId: number, updateData: Partial<InsertContent>): Promise<Content> {
+    const [updatedContent] = await db
+      .update(content)
+      .set(updateData)
+      .where(eq(content.id, contentId))
+      .returning();
+    
+    return this.mapContentFromDb(updatedContent);
+  }
+  
+  async deleteContent(contentId: number): Promise<void> {
+    await db
+      .delete(content)
+      .where(eq(content.id, contentId));
+  }
+
   // Helper method to convert database content to API content format
   private mapContentFromDb(dbContent: any): Content {
-    // Validate and parse the content using the Zod schema
-    const parsedContent = contentSchema.parse({
+    // Make sure we handle null values properly
+    return {
       id: dbContent.id,
       title: dbContent.title,
       description: dbContent.description,
@@ -322,17 +348,15 @@ export class DatabaseStorage implements IStorage {
       genres: dbContent.genres,
       posterUrl: dbContent.posterUrl,
       backdropUrl: dbContent.backdropUrl,
-      rating: dbContent.rating,
-      duration: dbContent.duration,
-      trailerUrl: dbContent.trailerUrl,
-      isExclusive: dbContent.isExclusive,
-      isNew: dbContent.isNew,
-      seasons: dbContent.seasons,
-      videoUrl: dbContent.videoUrl,
-      createdAt: dbContent.createdAt
-    });
-    
-    return parsedContent;
+      rating: dbContent.rating || null,
+      duration: dbContent.duration || null,
+      trailerUrl: dbContent.trailerUrl || null,
+      isExclusive: dbContent.isExclusive || false,
+      isNew: dbContent.isNew || false,
+      seasons: dbContent.seasons || null,
+      videoUrl: dbContent.videoUrl || null,
+      createdAt: dbContent.createdAt || null
+    };
   }
 
   // Helper method to seed the database with initial content
