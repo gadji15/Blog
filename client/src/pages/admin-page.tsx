@@ -3,8 +3,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from '@/lib/i18n';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
-import { Content, User, contentSchema, genres } from '@shared/schema';
-import { useForm } from 'react-hook-form';
+import { Content, User, contentSchema, genres, maturityRatings, castMemberSchema } from '@shared/schema';
+import { useForm, useFieldArray } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { apiRequest } from '@/lib/queryClient';
@@ -69,7 +69,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Loader2, Edit, Trash2, Plus, Film, Tv, User as UserIcon, LineChart } from 'lucide-react';
+import { Loader2, Edit, Trash2, Plus, Film, Tv, User as UserIcon, LineChart, Star } from 'lucide-react';
 
 // Form schema for content management
 const contentFormSchema = contentSchema.omit({ id: true });
@@ -125,6 +125,12 @@ export default function AdminPage() {
       maturityRating: "",
       cast: [],
     },
+  });
+  
+  // Setup field array for cast management
+  const { fields: castFields, append: appendCast, remove: removeCast } = useFieldArray({
+    control: contentForm.control,
+    name: "cast",
   });
   
   // Reset form when dialog opens/closes
@@ -463,19 +469,91 @@ export default function AdminPage() {
                   />
                 </div>
                 
-                <FormField
-                  control={contentForm.control}
-                  name="videoUrl"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Video URL</FormLabel>
-                      <FormControl>
-                        <Input placeholder="https://example.com/video.mp4" {...field} />
-                      </FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField
+                    control={contentForm.control}
+                    name="videoUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Video URL</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://example.com/video.mp4" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={contentForm.control}
+                    name="trailerUrl"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Trailer URL</FormLabel>
+                        <FormControl>
+                          <Input placeholder="https://www.youtube.com/watch?v=xyz" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <FormField
+                    control={contentForm.control}
+                    name="director"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Director</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Director name" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={contentForm.control}
+                    name="studio"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Studio</FormLabel>
+                        <FormControl>
+                          <Input placeholder="Production studio" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  
+                  <FormField
+                    control={contentForm.control}
+                    name="maturityRating"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Maturity Rating</FormLabel>
+                        <Select 
+                          onValueChange={field.onChange} 
+                          defaultValue={field.value}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select rating" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {maturityRatings.map(rating => (
+                              <SelectItem key={rating} value={rating}>{rating}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
                 
                 <FormField
                   control={contentForm.control}
@@ -575,6 +653,90 @@ export default function AdminPage() {
                       </FormItem>
                     )}
                   />
+                </div>
+                
+                <div className="space-y-4">
+                  <div className="flex justify-between items-center">
+                    <h3 className="text-lg font-medium">Cast</h3>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => appendCast({ name: "", role: "", photo: "" })}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add Cast Member
+                    </Button>
+                  </div>
+                  
+                  {castFields.length === 0 ? (
+                    <div className="text-center p-4 border rounded-md text-muted-foreground">
+                      No cast members added yet. Click "Add Cast Member" to add one.
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      {castFields.map((field, index) => (
+                        <div key={field.id} className="flex flex-col space-y-3 p-4 border rounded-md relative">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="absolute top-2 right-2 h-6 w-6 text-destructive"
+                            onClick={() => removeCast(index)}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FormField
+                              control={contentForm.control}
+                              name={`cast.${index}.name`}
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Actor Name</FormLabel>
+                                  <FormControl>
+                                    <Input placeholder="Actor name" {...field} />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                            
+                            <FormField
+                              control={contentForm.control}
+                              name={`cast.${index}.role`}
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Character Role</FormLabel>
+                                  <FormControl>
+                                    <Input placeholder="Character name" {...field} />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+                          
+                          <FormField
+                            control={contentForm.control}
+                            name={`cast.${index}.photo`}
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Actor Photo URL</FormLabel>
+                                <FormControl>
+                                  <Input placeholder="https://example.com/actor-photo.jpg" {...field} />
+                                </FormControl>
+                                <FormDescription>
+                                  Optional: URL to the actor's headshot
+                                </FormDescription>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 
                 <DialogFooter>
