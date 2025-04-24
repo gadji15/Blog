@@ -1,7 +1,9 @@
-import { pgTable, text, serial, integer, boolean, timestamp, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, serial, integer, boolean, timestamp, jsonb, primaryKey, foreignKey, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
+import { relations } from "drizzle-orm";
 import { z } from "zod";
 
+// Users table
 export const users = pgTable("users", {
   id: serial("id").primaryKey(),
   username: text("username").notNull().unique(),
@@ -14,6 +16,80 @@ export const users = pgTable("users", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const usersRelations = relations(users, ({ many }) => ({
+  favorites: many(favorites),
+  progress: many(progress),
+}));
+
+// Content table
+export const content = pgTable("content", {
+  id: serial("id").primaryKey(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  type: text("type").notNull(), // "movie" or "series"
+  releaseYear: integer("release_year").notNull(),
+  genres: text("genres").array().notNull(),
+  posterUrl: text("poster_url").notNull(),
+  backdropUrl: text("backdrop_url").notNull(),
+  rating: integer("rating"),
+  duration: integer("duration"), // in minutes, for movies
+  trailerUrl: text("trailer_url"),
+  isExclusive: boolean("is_exclusive").default(false),
+  isNew: boolean("is_new").default(false),
+  seasons: integer("seasons"), // only for series
+  videoUrl: text("video_url"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+export const contentRelations = relations(content, ({ many }) => ({
+  favorites: many(favorites),
+  progress: many(progress),
+}));
+
+// User Progress table
+export const progress = pgTable("progress", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  contentId: integer("content_id").notNull().references(() => content.id, { onDelete: "cascade" }),
+  progress: integer("progress").notNull(), // Percentage completed (0-100)
+  timestamp: timestamp("timestamp").defaultNow(),
+  currentEpisode: integer("current_episode"),
+  currentSeason: integer("current_season"),
+  timeRemaining: integer("time_remaining"), // in seconds
+});
+
+export const progressRelations = relations(progress, ({ one }) => ({
+  user: one(users, {
+    fields: [progress.userId],
+    references: [users.id],
+  }),
+  content: one(content, {
+    fields: [progress.contentId],
+    references: [content.id],
+  }),
+}));
+
+// User Favorites table
+export const favorites = pgTable("favorites", {
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  contentId: integer("content_id").notNull().references(() => content.id, { onDelete: "cascade" }),
+  addedAt: timestamp("added_at").defaultNow(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.userId, t.contentId] }),
+}));
+
+export const favoritesRelations = relations(favorites, ({ one }) => ({
+  user: one(users, {
+    fields: [favorites.userId],
+    references: [users.id],
+  }),
+  content: one(content, {
+    fields: [favorites.contentId],
+    references: [content.id],
+  }),
+}));
+
+// Schemas for validation
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   isAdmin: true,
@@ -25,12 +101,27 @@ export const loginUserSchema = z.object({
   password: z.string().min(6, "Password must be at least 6 characters"),
 });
 
+export const insertContentSchema = createInsertSchema(content).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertProgressSchema = createInsertSchema(progress).omit({
+  id: true,
+  timestamp: true,
+});
+
+export const insertFavoriteSchema = createInsertSchema(favorites).omit({
+  addedAt: true,
+});
+
 export const genres = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", 
   "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", 
   "Thriller", "Western"
 ];
 
+// Zod schemas for API validation
 export const contentSchema = z.object({
   id: z.number(),
   title: z.string(),
@@ -47,9 +138,11 @@ export const contentSchema = z.object({
   isNew: z.boolean().default(false),
   seasons: z.number().optional(), // only for series
   videoUrl: z.string().optional(),
+  createdAt: z.date().optional(),
 });
 
 export const progressSchema = z.object({
+  id: z.number().optional(),
   userId: z.number(),
   contentId: z.number(),
   progress: z.number(), // Percentage completed (0-100)
@@ -65,9 +158,13 @@ export const favoriteSchema = z.object({
   addedAt: z.date().optional(),
 });
 
+// Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type LoginUser = z.infer<typeof loginUserSchema>;
 export type User = typeof users.$inferSelect;
-export type Content = z.infer<typeof contentSchema>;
-export type Progress = z.infer<typeof progressSchema>;
-export type Favorite = z.infer<typeof favoriteSchema>;
+export type InsertContent = z.infer<typeof insertContentSchema>;
+export type Content = typeof content.$inferSelect;
+export type InsertProgress = z.infer<typeof insertProgressSchema>;
+export type Progress = typeof progress.$inferSelect;
+export type InsertFavorite = z.infer<typeof insertFavoriteSchema>;
+export type Favorite = typeof favorites.$inferSelect;

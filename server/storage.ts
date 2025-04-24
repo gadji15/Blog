@@ -1,12 +1,19 @@
-import { users, type User, type InsertUser } from "@shared/schema";
-import { type Content, type Progress, type Favorite } from "@shared/schema";
+import { 
+  users, type User, type InsertUser, 
+  content, type Content, type InsertContent,
+  progress, type Progress, type InsertProgress,
+  favorites, type Favorite, type InsertFavorite,
+  contentSchema 
+} from "@shared/schema";
+import { db } from "./db";
+import { eq, and, like, sql, desc, asc, or, inArray } from "drizzle-orm";
 import session from "express-session";
-import createMemoryStore from "memorystore";
+import connectPg from "connect-pg-simple";
+import { pool } from "./db";
 
-const MemoryStore = createMemoryStore(session);
+const PostgresSessionStore = connectPg(session);
 
-// modify the interface with any CRUD methods
-// you might need
+// Interface for storage operations
 export interface IStorage {
   // User related methods
   getUser(id: number): Promise<User | undefined>;
@@ -27,199 +34,321 @@ export interface IStorage {
 
   // User progress related methods
   getUserProgress(userId: number): Promise<Progress[]>;
-  saveUserProgress(progress: Progress): Promise<Progress>;
+  saveUserProgress(progress: InsertProgress): Promise<Progress>;
   
   // User favorites related methods
   getUserFavorites(userId: number): Promise<Content[]>;
-  addToFavorites(favorite: Favorite): Promise<void>;
+  addToFavorites(favorite: InsertFavorite): Promise<void>;
   removeFromFavorites(userId: number, contentId: number): Promise<void>;
   
   // For user sessions
-  sessionStore: session.SessionStore;
+  sessionStore: session.Store;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<number, User>;
-  private content: Map<number, Content>;
-  private progress: Progress[];
-  private favorites: Favorite[];
-  currentId: number;
-  sessionStore: session.SessionStore;
+export class DatabaseStorage implements IStorage {
+  sessionStore: session.Store;
 
   constructor() {
-    this.users = new Map();
-    this.content = new Map();
-    this.progress = [];
-    this.favorites = [];
-    this.currentId = 1;
-    
-    this.sessionStore = new MemoryStore({
-      checkPeriod: 86400000, // prune expired entries every 24h
+    this.sessionStore = new PostgresSessionStore({ 
+      pool, 
+      createTableIfMissing: true 
     });
     
-    // Initialize with sample content
-    this.initializeContent();
+    // Seed the database with sample content if it's empty
+    this.seedDatabase();
   }
 
+  // User related methods
   async getUser(id: number): Promise<User | undefined> {
-    return this.users.get(id);
+    const [user] = await db.select().from(users).where(eq(users.id, id));
+    return user;
   }
 
   async getUserByUsername(username: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(
-      (user) => user.username === username,
-    );
+    const [user] = await db.select().from(users).where(eq(users.username, username));
+    return user;
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
-    const id = this.currentId++;
-    const user: User = { 
-      ...insertUser, 
-      id,
-      isAdmin: false,
-      createdAt: new Date(),
-    };
-    this.users.set(id, user);
+    const [user] = await db.insert(users).values(insertUser).returning();
     return user;
   }
 
   async updateUserLanguage(userId: number, language: string): Promise<User | undefined> {
-    const user = await this.getUser(userId);
-    if (!user) return undefined;
-    
-    user.language = language;
-    this.users.set(userId, user);
+    const [user] = await db
+      .update(users)
+      .set({ language })
+      .where(eq(users.id, userId))
+      .returning();
     return user;
   }
 
+  // Content related methods
   async getAllContent(): Promise<Content[]> {
-    return Array.from(this.content.values());
+    const results = await db.select().from(content);
+    return results.map(this.mapContentFromDb);
   }
 
   async getContentById(id: number): Promise<Content | undefined> {
-    return this.content.get(id);
+    const [result] = await db.select().from(content).where(eq(content.id, id));
+    if (!result) return undefined;
+    return this.mapContentFromDb(result);
   }
 
   async getContentByType(type: "movie" | "series"): Promise<Content[]> {
-    return Array.from(this.content.values()).filter(
-      (content) => content.type === type
-    );
+    const results = await db.select().from(content).where(eq(content.type, type));
+    return results.map(this.mapContentFromDb);
   }
 
   async getFeaturedContent(): Promise<Content> {
-    // Get one random featured content
-    const allContent = Array.from(this.content.values());
-    return allContent[Math.floor(Math.random() * allContent.length)];
+    // Get a random piece of content marked as exclusive
+    const exclusiveContent = await db
+      .select()
+      .from(content)
+      .where(eq(content.isExclusive, true))
+      .limit(10);
+    
+    if (exclusiveContent.length === 0) {
+      // Fallback: Get any content
+      const [randomContent] = await db.select().from(content).limit(1);
+      return this.mapContentFromDb(randomContent);
+    }
+    
+    // Pick a random exclusive content
+    const randomIndex = Math.floor(Math.random() * exclusiveContent.length);
+    return this.mapContentFromDb(exclusiveContent[randomIndex]);
   }
 
   async getTrendingContent(): Promise<Content[]> {
-    // Get random content as trending (in real world would be based on analytics)
-    const allContent = Array.from(this.content.values());
-    return this.shuffleArray(allContent).slice(0, 6);
+    // In a real app, this would be based on analytics
+    // For now, get 6 random pieces of content
+    const results = await db
+      .select()
+      .from(content)
+      .orderBy(sql`RANDOM()`)
+      .limit(6);
+    
+    return results.map(this.mapContentFromDb);
   }
 
   async getRecommendedContent(userId: number): Promise<Content[]> {
-    // In a real app, this would use user preferences
-    const allContent = Array.from(this.content.values());
-    return this.shuffleArray(allContent).slice(0, 6);
+    // Get content based on user's favorites and progress
+    // For now, return random content similar to favorites
+    const favoriteGenres = await db
+      .select({ genres: content.genres })
+      .from(content)
+      .innerJoin(favorites, eq(content.id, favorites.contentId))
+      .where(eq(favorites.userId, userId))
+      .limit(3);
+    
+    // If user has no favorites, return trending content
+    if (favoriteGenres.length === 0) {
+      return this.getTrendingContent();
+    }
+    
+    // Get unique genres from favorites (flattened)
+    const uniqueGenres = [...new Set(favoriteGenres.flatMap(f => f.genres))];
+    
+    // Get content that matches any of these genres
+    const results = await db
+      .select()
+      .from(content)
+      .where(
+        or(
+          ...uniqueGenres.map(genre => 
+            sql`${content.genres}::text[] && ARRAY[${genre}]::text[]`
+          )
+        )
+      )
+      .orderBy(sql`RANDOM()`)
+      .limit(6);
+    
+    return results.map(this.mapContentFromDb);
   }
 
   async getPopularSeries(): Promise<Content[]> {
-    const series = Array.from(this.content.values()).filter(
-      (content) => content.type === "series"
-    );
-    return this.shuffleArray(series).slice(0, 6);
+    const results = await db
+      .select()
+      .from(content)
+      .where(eq(content.type, "series"))
+      .orderBy(content.rating.desc())
+      .limit(6);
+    
+    return results.map(this.mapContentFromDb);
   }
 
   async getLatestMovies(): Promise<Content[]> {
-    const movies = Array.from(this.content.values()).filter(
-      (content) => content.type === "movie"
-    );
-    return this.shuffleArray(movies).slice(0, 8);
+    const results = await db
+      .select()
+      .from(content)
+      .where(eq(content.type, "movie"))
+      .orderBy(content.releaseYear.desc())
+      .limit(8);
+    
+    return results.map(this.mapContentFromDb);
   }
 
   async searchContent(query: string): Promise<Content[]> {
-    const lowerQuery = query.toLowerCase();
-    return Array.from(this.content.values()).filter(
-      (content) => 
-        content.title.toLowerCase().includes(lowerQuery) ||
-        content.description.toLowerCase().includes(lowerQuery) ||
-        content.genres.some(genre => genre.toLowerCase().includes(lowerQuery))
-    );
-  }
-
-  async getUserProgress(userId: number): Promise<Progress[]> {
-    return this.progress.filter(p => p.userId === userId);
-  }
-
-  async saveUserProgress(progress: Progress): Promise<Progress> {
-    // Check if progress already exists for this user and content
-    const existingIndex = this.progress.findIndex(
-      p => p.userId === progress.userId && p.contentId === progress.contentId
-    );
+    const lowerQuery = `%${query.toLowerCase()}%`;
     
-    if (existingIndex >= 0) {
+    const results = await db
+      .select()
+      .from(content)
+      .where(
+        or(
+          like(sql`LOWER(${content.title})`, lowerQuery),
+          like(sql`LOWER(${content.description})`, lowerQuery),
+          sql`EXISTS (
+            SELECT 1 FROM unnest(${content.genres}) AS genre 
+            WHERE LOWER(genre) LIKE ${lowerQuery}
+          )`
+        )
+      );
+    
+    return results.map(this.mapContentFromDb);
+  }
+
+  // User progress related methods
+  async getUserProgress(userId: number): Promise<Progress[]> {
+    const results = await db
+      .select()
+      .from(progress)
+      .where(eq(progress.userId, userId));
+    
+    return results;
+  }
+
+  async saveUserProgress(progressData: InsertProgress): Promise<Progress> {
+    // Check if progress already exists for this user and content
+    const [existingProgress] = await db
+      .select()
+      .from(progress)
+      .where(
+        and(
+          eq(progress.userId, progressData.userId),
+          eq(progress.contentId, progressData.contentId)
+        )
+      );
+    
+    if (existingProgress) {
       // Update existing progress
-      this.progress[existingIndex] = {
-        ...this.progress[existingIndex],
-        ...progress,
-        timestamp: new Date()
-      };
-      return this.progress[existingIndex];
+      const [updatedProgress] = await db
+        .update(progress)
+        .set({
+          ...progressData,
+          timestamp: new Date()
+        })
+        .where(eq(progress.id, existingProgress.id))
+        .returning();
+      
+      return updatedProgress;
     } else {
-      // Add new progress
-      const newProgress = {
-        ...progress,
-        timestamp: new Date()
-      };
-      this.progress.push(newProgress);
+      // Create new progress
+      const [newProgress] = await db
+        .insert(progress)
+        .values({
+          ...progressData,
+          timestamp: new Date()
+        })
+        .returning();
+      
       return newProgress;
     }
   }
 
+  // User favorites related methods
   async getUserFavorites(userId: number): Promise<Content[]> {
-    const userFavorites = this.favorites.filter(f => f.userId === userId);
+    const userFavorites = await db
+      .select({ contentId: favorites.contentId })
+      .from(favorites)
+      .where(eq(favorites.userId, userId));
+    
+    if (userFavorites.length === 0) {
+      return [];
+    }
+    
     const contentIds = userFavorites.map(f => f.contentId);
-    return Array.from(this.content.values()).filter(
-      content => contentIds.includes(content.id)
-    );
+    
+    const results = await db
+      .select()
+      .from(content)
+      .where(inArray(content.id, contentIds));
+    
+    return results.map(this.mapContentFromDb);
   }
 
-  async addToFavorites(favorite: Favorite): Promise<void> {
+  async addToFavorites(favorite: InsertFavorite): Promise<void> {
     // Check if already in favorites
-    const exists = this.favorites.some(
-      f => f.userId === favorite.userId && f.contentId === favorite.contentId
-    );
+    const [existingFavorite] = await db
+      .select()
+      .from(favorites)
+      .where(
+        and(
+          eq(favorites.userId, favorite.userId),
+          eq(favorites.contentId, favorite.contentId)
+        )
+      );
     
-    if (!exists) {
-      this.favorites.push({
-        ...favorite,
-        addedAt: new Date()
-      });
+    if (!existingFavorite) {
+      await db
+        .insert(favorites)
+        .values({
+          ...favorite,
+          addedAt: new Date()
+        });
     }
   }
 
   async removeFromFavorites(userId: number, contentId: number): Promise<void> {
-    this.favorites = this.favorites.filter(
-      f => !(f.userId === userId && f.contentId === contentId)
-    );
+    await db
+      .delete(favorites)
+      .where(
+        and(
+          eq(favorites.userId, userId),
+          eq(favorites.contentId, contentId)
+        )
+      );
   }
 
-  // Helper function to shuffle an array
-  private shuffleArray<T>(array: T[]): T[] {
-    const arrayCopy = [...array];
-    for (let i = arrayCopy.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arrayCopy[i], arrayCopy[j]] = [arrayCopy[j], arrayCopy[i]];
+  // Helper method to convert database content to API content format
+  private mapContentFromDb(dbContent: any): Content {
+    // Validate and parse the content using the Zod schema
+    const parsedContent = contentSchema.parse({
+      id: dbContent.id,
+      title: dbContent.title,
+      description: dbContent.description,
+      type: dbContent.type,
+      releaseYear: dbContent.releaseYear,
+      genres: dbContent.genres,
+      posterUrl: dbContent.posterUrl,
+      backdropUrl: dbContent.backdropUrl,
+      rating: dbContent.rating,
+      duration: dbContent.duration,
+      trailerUrl: dbContent.trailerUrl,
+      isExclusive: dbContent.isExclusive,
+      isNew: dbContent.isNew,
+      seasons: dbContent.seasons,
+      videoUrl: dbContent.videoUrl,
+      createdAt: dbContent.createdAt
+    });
+    
+    return parsedContent;
+  }
+
+  // Helper method to seed the database with initial content
+  private async seedDatabase() {
+    // Check if content table is empty
+    const [count] = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(content);
+    
+    if (count.count > 0) {
+      return; // Database already has content
     }
-    return arrayCopy;
-  }
-
-  // Initialize with sample content
-  private initializeContent() {
-    const sampleContent: Content[] = [
+    
+    // Sample content to seed the database
+    const sampleContent = [
       {
-        id: 1,
         title: "Nebula Odyssey",
         description: "A captivating sci-fi adventure that follows humanity's first interstellar mission to a distant planet. When unexpected anomalies threaten their mission, the crew must navigate cosmic dangers and personal conflicts to survive.",
         type: "movie",
@@ -235,7 +364,6 @@ export class MemStorage implements IStorage {
         videoUrl: "https://example.com/videos/nebula-odyssey"
       },
       {
-        id: 2,
         title: "Starlight Empire",
         description: "The galactic federation faces its greatest threat as rebel forces gain power. Follow Admiral Zara as she leads the last fleet to defend humanity's future.",
         type: "movie",
@@ -245,11 +373,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/vC8wj_Kphak",
         rating: 94,
         duration: 142,
+        isExclusive: false,
         isNew: true,
         videoUrl: "https://example.com/videos/starlight-empire"
       },
       {
-        id: 3,
         title: "Cyber Revolution",
         description: "In a world where humans and AI have merged, one man discovers a conspiracy that could end humanity as we know it.",
         type: "movie",
@@ -259,10 +387,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/m3hn2Kn5Bns",
         rating: 92,
         duration: 118,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/cyber-revolution"
       },
       {
-        id: 4,
         title: "Quantum Portal",
         description: "Physicists open a gateway to parallel universes, but they may have unleashed something that cannot be controlled.",
         type: "movie",
@@ -272,10 +401,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/_JBKdviweXI",
         rating: 89,
         duration: 125,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/quantum-portal"
       },
       {
-        id: 5,
         title: "Neon Knights",
         description: "In a cyberpunk megacity, a team of rogue hackers battle corrupt corporations to free the city from digital tyranny.",
         type: "movie",
@@ -285,10 +415,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/ZPeXrWxOjRQ",
         rating: 95,
         duration: 133,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/neon-knights"
       },
       {
-        id: 6,
         title: "Aurora Rising",
         description: "When strange lights appear in the sky worldwide, an astronomer makes a discovery that will change our understanding of the universe.",
         type: "movie",
@@ -299,10 +430,10 @@ export class MemStorage implements IStorage {
         rating: 91,
         duration: 128,
         isExclusive: true,
+        isNew: false,
         videoUrl: "https://example.com/videos/aurora-rising"
       },
       {
-        id: 7,
         title: "Eternal Eclipse",
         description: "A space mission to study a mysterious solar eclipse discovers that it's actually an alien megastructure.",
         type: "movie",
@@ -312,10 +443,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/nT9X1dlW9h0",
         rating: 88,
         duration: 115,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/eternal-eclipse"
       },
       {
-        id: 8,
         title: "Stellar Command",
         description: "The crew of the ISV Intrepid faces the challenges of deep space exploration and first contact with alien civilizations.",
         type: "series",
@@ -325,11 +457,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/vC8wj_Kphak",
         rating: 94,
         seasons: 3,
+        isExclusive: false,
         isNew: true,
         videoUrl: "https://example.com/videos/stellar-command"
       },
       {
-        id: 9,
         title: "Temporal Agents",
         description: "A secret government agency polices time travel and prevents tampering with the timeline.",
         type: "series",
@@ -339,10 +471,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/hv4mY9eHUOg",
         rating: 90,
         seasons: 5,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/temporal-agents"
       },
       {
-        id: 10,
         title: "Dream Protocol",
         description: "A new technology allows people to enter and manipulate dreams, but the boundary between dreams and reality begins to blur.",
         type: "series",
@@ -352,10 +485,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/PDX_a_82obo",
         rating: 92,
         seasons: 2,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/dream-protocol"
       },
       {
-        id: 11,
         title: "Cosmic Detectives",
         description: "Two detectives solve crimes across the galaxy, dealing with alien cultures and interstellar politics.",
         type: "series",
@@ -366,10 +500,10 @@ export class MemStorage implements IStorage {
         rating: 88,
         seasons: 1,
         isExclusive: true,
+        isNew: false,
         videoUrl: "https://example.com/videos/cosmic-detectives"
       },
       {
-        id: 12,
         title: "Neon Dynasty",
         description: "In a future Japan, artificial intelligence has evolved to create a new social hierarchy and ignites a technological revolution.",
         type: "series",
@@ -379,10 +513,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/AYOloXG-Qig",
         rating: 93,
         seasons: 4,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/neon-dynasty"
       },
       {
-        id: 13,
         title: "Quantum Collapse",
         description: "Physicists discover that the universe is beginning to collapse, and they have only months to find a solution.",
         type: "series",
@@ -392,10 +527,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/5QgIuuBxKwM",
         rating: 91,
         seasons: 2,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/quantum-collapse"
       },
       {
-        id: 14,
         title: "Galactic Frontiers",
         description: "Colonists on the edge of explored space face harsh conditions and discover mysterious alien artifacts.",
         type: "series",
@@ -405,10 +541,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/Y8K6WDctxBs",
         rating: 87,
         seasons: 3,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/galactic-frontiers"
       },
       {
-        id: 15,
         title: "Astral Horizon",
         description: "A deep space exploration mission encounters a phenomenon that challenges our understanding of physics and reality.",
         type: "movie",
@@ -418,10 +555,11 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/U2BI3GMnSSE",
         rating: 90,
         duration: 144,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/astral-horizon"
       },
       {
-        id: 16,
         title: "Cyber Nexus",
         description: "A hacker uncovers a global conspiracy involving mind control through neural implants.",
         type: "series",
@@ -431,40 +569,15 @@ export class MemStorage implements IStorage {
         backdropUrl: "https://source.unsplash.com/BtbjCFUvBXs",
         rating: 89,
         seasons: 2,
+        isExclusive: false,
+        isNew: false,
         videoUrl: "https://example.com/videos/cyber-nexus"
-      },
-      {
-        id: 17,
-        title: "Parallel Dreams",
-        description: "A machine that can record and play back dreams reveals alternate realities and hidden truths.",
-        type: "movie",
-        releaseYear: 2022,
-        genres: ["Sci-Fi", "Drama", "Mystery"],
-        posterUrl: "https://source.unsplash.com/c9FQyqIECds",
-        backdropUrl: "https://source.unsplash.com/c9FQyqIECds",
-        rating: 86,
-        duration: 112,
-        videoUrl: "https://example.com/videos/parallel-dreams"
-      },
-      {
-        id: 18,
-        title: "Time Paradox",
-        description: "A time traveler breaks the cardinal rule and changes his past, creating a cascade of unintended consequences.",
-        type: "movie",
-        releaseYear: 2022,
-        genres: ["Sci-Fi", "Thriller", "Mystery"],
-        posterUrl: "https://source.unsplash.com/hv4mY9eHUOg",
-        backdropUrl: "https://source.unsplash.com/hv4mY9eHUOg",
-        rating: 93,
-        duration: 127,
-        videoUrl: "https://example.com/videos/time-paradox"
       }
     ];
-
-    sampleContent.forEach(content => {
-      this.content.set(content.id, content);
-    });
+    
+    // Insert content in batches
+    await db.insert(content).values(sampleContent);
   }
 }
 
-export const storage = new MemStorage();
+export const storage = new DatabaseStorage();
