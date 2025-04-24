@@ -12,13 +12,83 @@ export const users = pgTable("users", {
   firstName: text("first_name"),
   lastName: text("last_name"),
   isAdmin: boolean("is_admin").default(false),
+  isVip: boolean("is_vip").default(false),
+  vipExpiresAt: timestamp("vip_expires_at"),
+  preferredQuality: text("preferred_quality").default("auto"),
   language: text("language").default("en"),
   createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Subscription plans table
+export const subscriptionPlans = pgTable("subscription_plans", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  price: integer("price").notNull(), // Price in cents
+  duration: integer("duration").notNull(), // Duration in days
+  features: text("features").array().notNull(),
+  quality: text("quality").notNull(), // e.g., "HD", "4K", "8K"
+  description: text("description").notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Subscription table
+export const subscriptions = pgTable("subscriptions", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  planId: integer("plan_id").notNull().references(() => subscriptionPlans.id),
+  startDate: timestamp("start_date").notNull().defaultNow(),
+  endDate: timestamp("end_date").notNull(),
+  isActive: boolean("is_active").default(true),
+  autoRenew: boolean("auto_renew").default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
+// Payment transactions table
+export const payments = pgTable("payments", {
+  id: serial("id").primaryKey(),
+  userId: integer("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  subscriptionId: integer("subscription_id").references(() => subscriptions.id),
+  amount: integer("amount").notNull(), // Amount in cents
+  currency: text("currency").notNull().default("XOF"),
+  paymentMethod: text("payment_method").notNull(), // "wave", "orange_money", "credit_card"
+  paymentDetails: jsonb("payment_details"), // Store payment provider specific details
+  status: text("status").notNull(), // "pending", "completed", "failed", "refunded"
+  transactionId: text("transaction_id"), // External transaction ID
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
 });
 
 export const usersRelations = relations(users, ({ many }) => ({
   favorites: many(favorites),
   progress: many(progress),
+  subscriptions: many(subscriptions),
+  payments: many(payments),
+}));
+
+export const subscriptionPlansRelations = relations(subscriptionPlans, ({ many }) => ({
+  subscriptions: many(subscriptions),
+}));
+
+export const subscriptionsRelations = relations(subscriptions, ({ one, many }) => ({
+  user: one(users, {
+    fields: [subscriptions.userId],
+    references: [users.id],
+  }),
+  plan: one(subscriptionPlans, {
+    fields: [subscriptions.planId],
+    references: [subscriptionPlans.id],
+  }),
+  payments: many(payments),
+}));
+
+export const paymentsRelations = relations(payments, ({ one }) => ({
+  user: one(users, {
+    fields: [payments.userId],
+    references: [users.id],
+  }),
+  subscription: one(subscriptions, {
+    fields: [payments.subscriptionId],
+    references: [subscriptions.id],
+  }),
 }));
 
 // Content table
@@ -119,6 +189,21 @@ export const insertFavoriteSchema = createInsertSchema(favorites).omit({
   addedAt: true,
 });
 
+export const insertSubscriptionPlanSchema = createInsertSchema(subscriptionPlans).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertSubscriptionSchema = createInsertSchema(subscriptions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export const insertPaymentSchema = createInsertSchema(payments).omit({
+  id: true,
+  timestamp: true,
+});
+
 export const genres = [
   "Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", 
   "Drama", "Fantasy", "Horror", "Mystery", "Romance", "Sci-Fi", 
@@ -178,6 +263,53 @@ export const favoriteSchema = z.object({
   addedAt: z.date().optional(),
 });
 
+// Payment methods
+export const paymentMethods = ["wave", "orange_money", "credit_card"] as const;
+
+// Zod schemas for subscription and payment
+export const subscriptionPlanSchema = z.object({
+  id: z.number(),
+  name: z.string(),
+  price: z.number(),
+  duration: z.number(),
+  features: z.array(z.string()),
+  quality: z.string(),
+  description: z.string(),
+  createdAt: z.date().optional(),
+});
+
+export const subscriptionSchema = z.object({
+  id: z.number(),
+  userId: z.number(),
+  planId: z.number(),
+  startDate: z.date(),
+  endDate: z.date(),
+  isActive: z.boolean(),
+  autoRenew: z.boolean(),
+  createdAt: z.date().optional(),
+});
+
+export const paymentDetailsSchema = z.object({
+  provider: z.string().optional(),
+  transactionReference: z.string().optional(),
+  accountNumber: z.string().optional(),
+  cardLast4: z.string().optional(),
+  receiptUrl: z.string().optional(),
+}).passthrough();
+
+export const paymentSchema = z.object({
+  id: z.number(),
+  userId: z.number(),
+  subscriptionId: z.number().optional(),
+  amount: z.number(),
+  currency: z.string(),
+  paymentMethod: z.enum(paymentMethods),
+  paymentDetails: paymentDetailsSchema.optional(),
+  status: z.enum(["pending", "completed", "failed", "refunded"]),
+  transactionId: z.string().optional(),
+  timestamp: z.date(),
+});
+
 // Types
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type LoginUser = z.infer<typeof loginUserSchema>;
@@ -188,3 +320,9 @@ export type InsertProgress = z.infer<typeof insertProgressSchema>;
 export type Progress = typeof progress.$inferSelect;
 export type InsertFavorite = z.infer<typeof insertFavoriteSchema>;
 export type Favorite = typeof favorites.$inferSelect;
+export type InsertSubscriptionPlan = z.infer<typeof insertSubscriptionPlanSchema>;
+export type SubscriptionPlan = typeof subscriptionPlans.$inferSelect;
+export type InsertSubscription = z.infer<typeof insertSubscriptionSchema>;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type InsertPayment = z.infer<typeof insertPaymentSchema>;
+export type Payment = typeof payments.$inferSelect;
