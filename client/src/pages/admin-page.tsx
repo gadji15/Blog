@@ -128,12 +128,22 @@ export default function AdminPage() {
     setIsDialogOpen(true);
   };
   
-  // Add mock content mutation (would connect to actual API in production)
+  // Add content mutation
   const addContentMutation = useMutation({
     mutationFn: async (data: z.infer<typeof contentFormSchema>) => {
-      // In a real app, this would be an API call to create content
-      const mockResponse = { id: Date.now(), ...data };
-      return mockResponse as Content;
+      if (selectedContent) {
+        // Update existing content
+        const res = await apiRequest(
+          'PATCH', 
+          `/api/admin/content/${selectedContent.id}`, 
+          data
+        );
+        return await res.json();
+      } else {
+        // Create new content
+        const res = await apiRequest('POST', '/api/admin/content', data);
+        return await res.json();
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/content'] });
@@ -142,11 +152,11 @@ export default function AdminPage() {
     },
   });
   
-  // Delete mock content mutation (would connect to actual API in production)
+  // Delete content mutation
   const deleteContentMutation = useMutation({
     mutationFn: async (id: number) => {
-      // In a real app, this would be an API call to delete content
-      return id;
+      const res = await apiRequest('DELETE', `/api/admin/content/${id}`);
+      return await res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/content'] });

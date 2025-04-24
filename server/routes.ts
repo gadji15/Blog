@@ -2,6 +2,7 @@ import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { setupAuth } from "./auth";
+import { insertContentSchema } from "@shared/schema";
 
 // Middleware to check if user is authenticated
 const ensureAuthenticated = (req: Request, res: Response, next: NextFunction) => {
@@ -189,6 +190,65 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       await storage.removeFromFavorites(req.user.id, contentId);
       res.json({ message: "Removed from favorites" });
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  // Admin content management routes
+  app.post("/api/admin/content", ensureAdmin, async (req, res, next) => {
+    try {
+      // Parse and validate the input using the schema
+      const contentData = insertContentSchema.parse(req.body);
+      
+      // Add content to database
+      const newContent = await storage.addContent(contentData);
+      
+      res.status(201).json(newContent);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.patch("/api/admin/content/:id", ensureAdmin, async (req, res, next) => {
+    try {
+      const contentId = parseInt(req.params.id);
+      if (isNaN(contentId)) {
+        return res.status(400).json({ message: "Invalid ID format" });
+      }
+      
+      // First check if content exists
+      const existingContent = await storage.getContentById(contentId);
+      if (!existingContent) {
+        return res.status(404).json({ message: "Content not found" });
+      }
+      
+      // Update content in database
+      const updatedContent = await storage.updateContent(contentId, req.body);
+      
+      res.json(updatedContent);
+    } catch (error) {
+      next(error);
+    }
+  });
+
+  app.delete("/api/admin/content/:id", ensureAdmin, async (req, res, next) => {
+    try {
+      const contentId = parseInt(req.params.id);
+      if (isNaN(contentId)) {
+        return res.status(400).json({ message: "Invalid ID format" });
+      }
+      
+      // First check if content exists
+      const existingContent = await storage.getContentById(contentId);
+      if (!existingContent) {
+        return res.status(404).json({ message: "Content not found" });
+      }
+      
+      // Delete content from database
+      await storage.deleteContent(contentId);
+      
+      res.json({ message: "Content deleted successfully" });
     } catch (error) {
       next(error);
     }
