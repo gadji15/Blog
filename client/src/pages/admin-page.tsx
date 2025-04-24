@@ -116,9 +116,14 @@ export default function AdminPage() {
       rating: 85,
       duration: 120,
       videoUrl: "",
+      trailerUrl: "",
       isExclusive: false,
       isNew: true,
       seasons: 1,
+      director: "",
+      studio: "",
+      maturityRating: "",
+      cast: [],
     },
   });
   

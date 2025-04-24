@@ -38,6 +38,10 @@ export const content = pgTable("content", {
   isNew: boolean("is_new").default(false),
   seasons: integer("seasons"), // only for series
   videoUrl: text("video_url"),
+  cast: jsonb("cast").$type<Array<{name: string, role: string, photo?: string}>>(),
+  director: text("director"),
+  studio: text("studio"),
+  maturityRating: text("maturity_rating"), // e.g., "PG-13", "R", "TV-MA"
   createdAt: timestamp("created_at").defaultNow(),
 });
 
@@ -121,7 +125,19 @@ export const genres = [
   "Thriller", "Western"
 ];
 
+// Maturity rating options
+export const maturityRatings = [
+  "G", "PG", "PG-13", "R", "NC-17", // Movie ratings
+  "TV-Y", "TV-Y7", "TV-G", "TV-PG", "TV-14", "TV-MA" // TV ratings
+];
+
 // Zod schemas for API validation
+export const castMemberSchema = z.object({
+  name: z.string(),
+  role: z.string(),
+  photo: z.string().optional(),
+});
+
 export const contentSchema = z.object({
   id: z.number(),
   title: z.string(),
@@ -138,6 +154,10 @@ export const contentSchema = z.object({
   isNew: z.boolean().default(false),
   seasons: z.number().optional().nullable(), // only for series
   videoUrl: z.string().optional().nullable(),
+  cast: z.array(castMemberSchema).optional().nullable(),
+  director: z.string().optional().nullable(),
+  studio: z.string().optional().nullable(),
+  maturityRating: z.string().optional().nullable(),
   createdAt: z.date().optional().nullable(),
 });
 

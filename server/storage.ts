@@ -355,6 +355,10 @@ export class DatabaseStorage implements IStorage {
       isNew: dbContent.isNew || false,
       seasons: dbContent.seasons || null,
       videoUrl: dbContent.videoUrl || null,
+      cast: dbContent.cast || null,
+      director: dbContent.director || null,
+      studio: dbContent.studio || null,
+      maturityRating: dbContent.maturityRating || null,
       createdAt: dbContent.createdAt || null
     };
   }
