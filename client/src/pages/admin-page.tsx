@@ -48,6 +48,16 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -68,7 +78,9 @@ export default function AdminPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [selectedContent, setSelectedContent] = useState<Content | null>(null);
+  const [contentToDelete, setContentToDelete] = useState<Content | null>(null);
   
   // Fetch all content
   const { data: allContent = [], isLoading: isLoadingContent } = useQuery<Content[]>({
@@ -128,6 +140,8 @@ export default function AdminPage() {
     setIsDialogOpen(true);
   };
   
+  const { toast } = useToast();
+  
   // Add content mutation
   const addContentMutation = useMutation({
     mutationFn: async (data: z.infer<typeof contentFormSchema>) => {
@@ -145,11 +159,22 @@ export default function AdminPage() {
         return await res.json();
       }
     },
-    onSuccess: () => {
+    onSuccess: (content) => {
       queryClient.invalidateQueries({ queryKey: ['/api/content'] });
       setIsDialogOpen(false);
       contentForm.reset();
+      toast({
+        title: selectedContent ? "Content updated" : "Content added",
+        description: `"${content.title}" has been ${selectedContent ? "updated" : "added"} successfully.`,
+      });
     },
+    onError: (error: Error) => {
+      toast({
+        title: "Action failed",
+        description: error.message || "There was an error processing your request",
+        variant: "destructive",
+      });
+    }
   });
   
   // Delete content mutation
@@ -158,9 +183,20 @@ export default function AdminPage() {
       const res = await apiRequest('DELETE', `/api/admin/content/${id}`);
       return await res.json();
     },
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
       queryClient.invalidateQueries({ queryKey: ['/api/content'] });
+      toast({
+        title: "Content deleted",
+        description: "The content has been deleted successfully."
+      });
     },
+    onError: (error: Error) => {
+      toast({
+        title: "Delete failed", 
+        description: error.message || "There was an error deleting the content",
+        variant: "destructive",
+      });
+    }
   });
   
   // Handle form submission
@@ -213,7 +249,10 @@ export default function AdminPage() {
                     variant="ghost"
                     size="icon"
                     className="text-destructive"
-                    onClick={() => deleteContentMutation.mutate(content.id)}
+                    onClick={() => {
+                      setContentToDelete(content);
+                      setIsDeleteDialogOpen(true);
+                    }}
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
@@ -687,6 +726,41 @@ export default function AdminPage() {
           </Card>
         </TabsContent>
       </Tabs>
+      
+      {/* Delete confirmation dialog */}
+      <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete{' '}
+              <span className="font-semibold">{contentToDelete?.title}</span> and remove it from all user favorites and watch history.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (contentToDelete) {
+                  deleteContentMutation.mutate(contentToDelete.id);
+                  setContentToDelete(null);
+                }
+              }}
+              className="bg-destructive hover:bg-destructive/90"
+              disabled={deleteContentMutation.isPending}
+            >
+              {deleteContentMutation.isPending ? (
+                <span className="flex items-center">
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </span>
+              ) : (
+                'Delete'
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
