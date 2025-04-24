@@ -1,0 +1,170 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 240 10% 3.9%;
+    --foreground: 0 0% 98%;
+    --muted: 240 3.7% 15.9%;
+    --muted-foreground: 240 5% 64.9%;
+    --popover: 240 10% 3.9%;
+    --popover-foreground: 0 0% 98%;
+    --card: 240 10% 3.9%;
+    --card-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 3.7% 15.9%;
+    --primary: 266 84% 77%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 0 0% 98%;
+    --accent: 327 73% 65%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 240 4.9% 83.9%;
+    --radius: 0.5rem;
+
+    /* StreamFlow customizations */
+    --sf-dark: 230 24% 10%;
+    --sf-darker: 235 53% 8%;
+    --sf-darkblue: 220 16% 14%;
+    --sf-purple: 266 84% 77%;
+    --sf-pink: 327 73% 65%;
+    --sf-blue: 217 91% 60%;
+    --sf-card: 222 23% 17%;
+    --sf-card-hover: 220 26% 25%;
+  }
+
+  .light {
+    --background: 0 0% 100%;
+    --foreground: 240 10% 3.9%;
+    --muted: 240 4.8% 95.9%;
+    --muted-foreground: 240 3.8% 46.1%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 10% 3.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 3.9%;
+    --border: 240 5.9% 90%;
+    --input: 240 5.9% 90%;
+    --primary: 266 84% 57%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4.8% 95.9%;
+    --secondary-foreground: 240 5.9% 10%;
+    --accent: 327 73% 55%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 0 0% 98%;
+    --ring: 240 5% 64.9%;
+    --radius: 0.5rem;
+
+    /* StreamFlow light customizations */
+    --sf-dark: 0 0% 95%;
+    --sf-darker: 0 0% 90%;
+    --sf-darkblue: 220 16% 90%;
+    --sf-purple: 266 84% 57%;
+    --sf-pink: 327 73% 55%;
+    --sf-blue: 217 91% 50%;
+    --sf-card: 222 23% 95%;
+    --sf-card-hover: 220 26% 90%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Poppins', sans-serif;
+  }
+}
+
+/* Custom Animations */
+@layer utilities {
+  .animate-glow {
+    animation: glow 3s ease-in-out infinite alternate;
+  }
+  
+  @keyframes glow {
+    0% {
+      box-shadow: 0 0 5px rgba(139, 92, 246, 0.6);
+    }
+    100% {
+      box-shadow: 0 0 15px rgba(139, 92, 246, 0.8), 0 0 30px rgba(139, 92, 246, 0.4);
+    }
+  }
+}
+
+/* Content Card Styling */
+.content-card {
+  @apply transition-all duration-300 ease-in-out rounded-lg overflow-hidden;
+}
+
+.content-card:hover {
+  @apply transform scale-105 shadow-lg z-10;
+}
+
+.content-card:hover .play-icon-overlay {
+  @apply opacity-100;
+}
+
+.play-icon-overlay {
+  @apply opacity-0 transition-opacity duration-300;
+}
+
+/* Carousel Styling */
+.carousel-container {
+  @apply overflow-x-auto scrollbar-hide scroll-smooth;
+}
+
+.carousel-container::-webkit-scrollbar {
+  display: none;
+}
+
+.gradient-left {
+  background: linear-gradient(to right, hsl(var(--sf-dark)), transparent);
+  @apply absolute left-0 top-0 bottom-0 w-16 z-10 pointer-events-none;
+}
+
+.gradient-right {
+  background: linear-gradient(to left, hsl(var(--sf-dark)), transparent);
+  @apply absolute right-0 top-0 bottom-0 w-16 z-10 pointer-events-none;
+}
+
+/* Video Player Styling */
+.video-player-container {
+  @apply relative overflow-hidden rounded-xl;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+}
+
+.video-controls {
+  background: linear-gradient(to top, rgba(10, 16, 31, 0.8) 0%, transparent 100%);
+  @apply transition-opacity duration-300;
+}
+
+.video-player-container:hover .video-controls {
+  @apply opacity-100;
+}
+
+/* Custom Range Input for Video Progress */
+input[type="range"] {
+  @apply h-1 bg-opacity-20 bg-white rounded outline-none;
+  -webkit-appearance: none;
+}
+
+input[type="range"]::-webkit-slider-thumb {
+  @apply w-3 h-3 bg-white rounded-full cursor-pointer;
+  -webkit-appearance: none;
+}
+
+/* Utilities */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
