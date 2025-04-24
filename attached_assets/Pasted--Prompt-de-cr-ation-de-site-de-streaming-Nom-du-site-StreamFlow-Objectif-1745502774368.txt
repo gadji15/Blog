@@ -1,0 +1,151 @@
+## 🧠 🎬 *Prompt de création de site de streaming – Nom du site : StreamFlow*
+
+---
+
+### 🎯 *Objectif principal du site*
+Créer un site de streaming vidéo dynamique, immersif et professionnel pour regarder des *films et séries*. Le site doit avoir :
+- Une interface utilisateur *moderne, fluide, animée*
+- Un design orienté *cinéma/TV*
+- Une navigation intuitive et rapide
+- Des *pages légales* complètes
+- Une *interface administrateur* fonctionnelle
+- Une architecture *sécurisée, responsive*, multilingue
+- Des effets visuels attractifs (hover, transitions, animation d’entrée)
+- Des *fonctionnalités de gestion de contenu* (ajout/modif de films, gestion utilisateurs)
+
+---
+
+## 🖥 *Technologies à utiliser*
+Utiliser un *stack complet et dynamique* :
+- *Frontend :*
+  - HTML5, CSS3
+  - JavaScript (avec ou sans frameworks comme React, Vue)
+  - Librairies d’animations : *GSAP, **AOS.js, **Hover.css, **Lottie*
+  - Responsive Design avec *Media Queries*
+- *Backend :*
+  - *Java avec Spring Boot* pour les APIs, la sécurité et les traitements serveur
+- *Autres indispensables :*
+  - Player vidéo en HTML5 avec lecteur personnalisé
+  - Intégration AJAX ou Fetch pour chargement dynamique
+  - Polices modernes (Google Fonts : Poppins, Inter, Roboto)
+  - Mode sombre par défaut avec bouton *toggle*
+
+---
+
+## 🧩 *Pages à créer pour une expérience complète et professionnelle*
+
+### 🏠 Page d'accueil (Home)
+- Présentation en Hero (bannière dynamique avec fond flou et CTA)
+- Sections : *"Nouveautés", **"Tendances", **"Recommandés pour vous"*
+- Carrousels animés de films/séries
+- Affiches avec effets de survol (zoom, shadow, gradient overlay)
+- CTA clairs : "Regarder", "Ajouter à ma liste"
+
+---
+
+### 🎬 Page *Films*
+- Grille avec vignettes animées
+- Filtres : genre, année, langue, popularité
+- Scroll fluide avec lazy loading des films
+- Hover avec options rapides : voir détails, ajouter à favoris, lire bande-annonce
+
+---
+
+### 📺 Page *Séries*
+- Mêmes fonctionnalités que la page Films
+- Affichage organisé par série → saison → épisode
+- Marqueurs visuels : “Nouveau”, “Top 10”, “Exclusif”
+
+---
+
+### 📄 Page *Détails d’un Film ou d'une Série*
+- Grand visuel avec bouton “Regarder maintenant”
+- Description complète, genres, durée, casting
+- Bande-annonce intégrée
+- Évaluation par étoiles ou % (Rotten-style)
+- Recommandations dynamiques similaires
+
+---
+
+### ▶ Page *Lecteur Vidéo*
+- Lecteur HTML5 personnalisé :
+  - Résolutions multiples, plein écran, sous-titres
+  - Contrôles personnalisés (vitesse, avance, replay)
+  - Auto-play du prochain épisode
+  - Sauvegarde du dernier visionnage
+  - Apparence sombre/néon avec transitions
+
+---
+
+### 🔍 Page *Recherche*
+- Barre dynamique avec autocomplétion (via JavaScript ou AJAX)
+- Résultats par catégorie
+- Option de tri (populaire, date, alphabet)
+
+---
+
+### 👤 Pages *Connexion / Inscription*
+- Formulaires stylisés et sécurisés
+- Authentification via email/mot de passe
+- Mot de passe oublié
+- Email de vérification
+- Interface fluide, intuitive, animée
+
+---
+
+### 🧑‍💻 Interface *Administrateur*
+- Tableau de bord pour :
+  - Ajouter, modifier, supprimer des films et séries
+  - Gérer les utilisateurs
+  - Voir les statistiques (nombre de vues, utilisateurs actifs, contenus populaires)
+  - Upload facile (affiche, bande-annonce, fichiers vidéo)
+  - Interface sobre et intuitive
+
+---
+
+### ⚖ Pages *Légales (obligatoires)*
+À inclure dans le footer et accessibles depuis toutes les pages :
+- *Mentions légales*
+- *Conditions Générales d’Utilisation (CGU)*
+- *Politique de confidentialité*
+- *Politique de cookies*
+- *Page contact (formulaire sécurisé avec captcha)*
+
+---
+
+### 📲 *Fonctionnalités supplémentaires importantes*
+- 🌙 *Mode sombre/clair toggle*
+- 🎥 Continuer à regarder (historique local)
+- 💾 Ajouter aux favoris / ma liste
+- 📢 Notification de sortie (par email ou in-app)
+- 📱 Responsive complet (mobile, tablette, TV)
+- 🌍 Site multilingue avec drapeau de langue (français / anglais minimum)
+- 🔐 Sécurité (connexion HTTPS, protection XSS, CSRF, JWT tokens pour l'authentification)
+
+---
+
+## 🎨 *Design & UI/UX requis*
+- Ambiance : *cinéma sombre*, dégradés lumineux (bleu nuit, violet, rouge néon)
+- Animations :
+  - Entrée avec fade / zoom
+  - Hover sur boutons et vignettes avec glow (effet néon)
+  - Transition douces entre pages
+- Loader visuel moderne en SVG animé ou texte cinématographique
+- Footer moderne avec :
+  - Réseaux sociaux (icônes animées au hover)
+  - Liens légaux
+  - Infos contact & copyright
+
+---
+
+### 🧠 *Conseils importants*
+- Ne jamais bloquer l’utilisateur : tous les éléments doivent être fluides
+- Penser mobile-first : tester chaque page sur plusieurs résolutions
+- Assurer que les performances restent optimales (lazy loading, optimisation des médias)
+- Intégrer un système de *pré-chargement intelligent* pour améliorer la vitesse
+
+---
+
+> *Résumé du prompt à copier-coller :*
+
+> Créer un site de streaming nommé **StreamFlow* en HTML, CSS, JavaScript et Java (Spring Boot) avec une interface utilisateur moderne, animée, responsive et professionnelle. Le site doit inclure les pages d’accueil, films, séries, détails, lecteur vidéo, recherche, authentification, administration, contact et toutes les pages légales. Intégrer des animations de survol, carrousels dynamiques, lecteur HTML5 personnalisé, filtres interactifs, ajout aux favoris, historique de visionnage et un espace d’administration complet pour gérer les contenus. Inclure un mode sombre, des polices modernes, des effets néon, et une sécurité renforcée.*
