@@ -37,7 +37,6 @@ const translations = {
     moreInfo: 'More Info',
     addToList: 'Add to My List',
     removeFromList: 'Remove from My List',
-    new: 'NEW',
     exclusive: 'EXCLUSIVE',
     seasons: 'Seasons',
     episodes: 'Episodes',
@@ -45,7 +44,6 @@ const translations = {
     // Video Player
     fullscreen: 'Fullscreen',
     subtitles: 'Subtitles',
-    settings: 'Settings',
     
     // Authentication
     login: 'Login',
@@ -194,7 +192,7 @@ export function useTranslation() {
   
   // Get translation for a key
   const t = (key: keyof typeof translations.en) => {
-    return translations[language][key] || translations.en[key] || key;
+    return translations[language]?.[key] || translations.en[key] || key;
   };
   
   return { t, language, changeLanguage };

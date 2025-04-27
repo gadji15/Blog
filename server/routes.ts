@@ -59,7 +59,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Content not found" });
       }
       
-      // Si le contenu est exclusif et que l'utilisateur n'est pas VIP, masquer l'URL de la vidéo
+      // If content is exclusive and user is not VIP, hide video URL
       if (content.isExclusive && (!req.isAuthenticated() || !req.user?.isVip)) {
         const { videoUrl, ...contentInfo } = content;
         return res.json({
