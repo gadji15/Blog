@@ -1,207 +1,156 @@
-import { 
-  users, type User, type InsertUser, 
-  content, type Content, type InsertContent,
-  progress, type Progress, type InsertProgress,
-  favorites, type Favorite, type InsertFavorite,
-  subscriptionPlans, type SubscriptionPlan, type InsertSubscriptionPlan,
-  subscriptions, type Subscription, type InsertSubscription,
-  payments, type Payment, type InsertPayment,
-  contentSchema 
-} from "@shared/schema";
-import { db } from "./db";
-import { eq, and, like, sql, desc, asc, or, inArray } from "drizzle-orm";
+import { Pool, neonConfig } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-serverless";
+import { eq, and, like, sql, or, inArray } from "drizzle-orm";
 import session from "express-session";
 import connectPg from "connect-pg-simple";
-import { pool } from "./db";
+import * as schema from "@shared/schema";
+import ws from "ws";
 
-const PostgresSessionStore = connectPg(session);
+// Configure Neon WebSocket for serverless environments
+neonConfig.webSocketConstructor = ws;
 
-// Interface for storage operations
-export interface IStorage {
-  // User related methods
-  getUser(id: number): Promise<User | undefined>;
-  getUserByUsername(username: string): Promise<User | undefined>;
-  createUser(user: InsertUser): Promise<User>;
-  updateUserLanguage(userId: number, language: string): Promise<User | undefined>;
-  updateUserVipStatus(userId: number, isVip: boolean, vipExpiresAt?: Date): Promise<User | undefined>;
-  updateUserPreferredQuality(userId: number, preferredQuality: string): Promise<User | undefined>;
-  
-  // Content related methods
-  getAllContent(): Promise<Content[]>;
-  getContentById(id: number): Promise<Content | undefined>;
-  getContentByType(type: "movie" | "series"): Promise<Content[]>;
-  getFeaturedContent(): Promise<Content>;
-  getTrendingContent(): Promise<Content[]>;
-  getRecommendedContent(userId: number): Promise<Content[]>;
-  getPopularSeries(): Promise<Content[]>;
-  getLatestMovies(): Promise<Content[]>;
-  searchContent(query: string): Promise<Content[]>;
-  getExclusiveContent(): Promise<Content[]>;
-
-  // User progress related methods
-  getUserProgress(userId: number): Promise<Progress[]>;
-  saveUserProgress(progress: InsertProgress): Promise<Progress>;
-  
-  // User favorites related methods
-  getUserFavorites(userId: number): Promise<Content[]>;
-  addToFavorites(favorite: InsertFavorite): Promise<void>;
-  removeFromFavorites(userId: number, contentId: number): Promise<void>;
-  
-  // Subscription plan related methods
-  getAllSubscriptionPlans(): Promise<SubscriptionPlan[]>;
-  getSubscriptionPlanById(id: number): Promise<SubscriptionPlan | undefined>;
-  createSubscriptionPlan(plan: InsertSubscriptionPlan): Promise<SubscriptionPlan>;
-  updateSubscriptionPlan(id: number, data: Partial<InsertSubscriptionPlan>): Promise<SubscriptionPlan>;
-  deleteSubscriptionPlan(id: number): Promise<void>;
-  
-  // User subscription related methods
-  getUserSubscription(userId: number): Promise<Subscription | undefined>;
-  createSubscription(subscription: InsertSubscription): Promise<Subscription>;
-  updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<Subscription>;
-  cancelSubscription(id: number): Promise<void>;
-  
-  // Payment related methods
-  getUserPayments(userId: number): Promise<Payment[]>;
-  createPayment(payment: InsertPayment): Promise<Payment>;
-  updatePaymentStatus(id: number, status: string, transactionId?: string): Promise<Payment>;
-  
-  // For user sessions
-  sessionStore: session.Store;
+// Check for DATABASE_URL environment variable
+if (!process.env.DATABASE_URL) {
+  throw new Error(
+    "DATABASE_URL must be set. Did you forget to provision a database?"
+  );
 }
 
-export class DatabaseStorage implements IStorage {
-  sessionStore: session.Store;
+// Connection pool
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const db = drizzle(pool, { schema });
+
+// Session store using PostgreSQL
+const PostgresSessionStore = connectPg(session);
+
+class DatabaseStorage {
+  sessionStore: connectPg.PGStore;
 
   constructor() {
-    this.sessionStore = new PostgresSessionStore({ 
-      pool, 
-      createTableIfMissing: true 
+    this.sessionStore = new PostgresSessionStore({
+      pool,
+      createTableIfMissing: true
     });
     
-    // Seed the database with sample content if it's empty
+    // Seed the database if it's empty
     this.seedDatabase();
   }
 
   // User related methods
-  async getUser(id: number): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.id, id));
+  async getUser(id: number) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, id));
     return user;
   }
 
-  async getUserByUsername(username: string): Promise<User | undefined> {
-    const [user] = await db.select().from(users).where(eq(users.username, username));
-    return user;
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const [user] = await db.insert(users).values(insertUser).returning();
-    return user;
-  }
-
-  async updateUserLanguage(userId: number, language: string): Promise<User | undefined> {
-    const [user] = await db
-      .update(users)
-      .set({ language })
-      .where(eq(users.id, userId))
-      .returning();
+  async getUserByUsername(username: string) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.username, username));
     return user;
   }
   
-  async updateUserVipStatus(userId: number, isVip: boolean, vipExpiresAt?: Date): Promise<User | undefined> {
-    const [user] = await db
-      .update(users)
-      .set({ 
+  async getUserByEmail(email: string) {
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.email, email));
+    return user;
+  }
+
+  async createUser(insertUser: any) {
+    const [user] = await db.insert(schema.users).values(insertUser).returning();
+    return user;
+  }
+  
+  async updateUserProfile(userId: number, data: { firstName?: string, lastName?: string, email?: string }) {
+    const [user] = await db.update(schema.users)
+      .set(data)
+      .where(eq(schema.users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async updateUserLanguage(userId: number, language: string) {
+    const [user] = await db.update(schema.users)
+      .set({ language })
+      .where(eq(schema.users.id, userId))
+      .returning();
+    return user;
+  }
+
+  async updateUserVipStatus(userId: number, isVip: boolean, vipExpiresAt?: Date) {
+    const [user] = await db.update(schema.users)
+      .set({
         isVip,
         vipExpiresAt: vipExpiresAt || null
       })
-      .where(eq(users.id, userId))
+      .where(eq(schema.users.id, userId))
       .returning();
     return user;
   }
-  
-  async updateUserPreferredQuality(userId: number, preferredQuality: string): Promise<User | undefined> {
-    const [user] = await db
-      .update(users)
+
+  async updateUserPreferredQuality(userId: number, preferredQuality: string) {
+    const [user] = await db.update(schema.users)
       .set({ preferredQuality })
-      .where(eq(users.id, userId))
+      .where(eq(schema.users.id, userId))
       .returning();
     return user;
   }
 
   // Content related methods
-  async getAllContent(): Promise<Content[]> {
-    const results = await db.select().from(content);
+  async getAllContent() {
+    const results = await db.select().from(schema.content);
     return results.map(this.mapContentFromDb);
   }
 
-  async getContentById(id: number): Promise<Content | undefined> {
-    const [result] = await db.select().from(content).where(eq(content.id, id));
+  async getContentById(id: number) {
+    const [result] = await db.select().from(schema.content).where(eq(schema.content.id, id));
     if (!result) return undefined;
     return this.mapContentFromDb(result);
   }
 
-  async getContentByType(type: "movie" | "series"): Promise<Content[]> {
-    const results = await db.select().from(content).where(eq(content.type, type));
+  async getContentByType(type: 'movie' | 'series') {
+    const results = await db.select().from(schema.content).where(eq(schema.content.type, type));
     return results.map(this.mapContentFromDb);
   }
 
-  async getFeaturedContent(): Promise<Content> {
-    // Get a random piece of content marked as exclusive
-    const exclusiveContent = await db
-      .select()
-      .from(content)
-      .where(eq(content.isExclusive, true))
+  async getFeaturedContent() {
+    const exclusiveContent = await db.select().from(schema.content)
+      .where(eq(schema.content.isExclusive, true))
       .limit(10);
     
     if (exclusiveContent.length === 0) {
-      // Fallback: Get any content
-      const [randomContent] = await db.select().from(content).limit(1);
+      const [randomContent] = await db.select().from(schema.content).limit(1);
       return this.mapContentFromDb(randomContent);
     }
     
-    // Pick a random exclusive content
     const randomIndex = Math.floor(Math.random() * exclusiveContent.length);
     return this.mapContentFromDb(exclusiveContent[randomIndex]);
   }
 
-  async getTrendingContent(): Promise<Content[]> {
-    // In a real app, this would be based on analytics
-    // For now, get 6 random pieces of content
-    const results = await db
-      .select()
-      .from(content)
+  async getTrendingContent() {
+    const results = await db.select().from(schema.content)
       .orderBy(sql`RANDOM()`)
       .limit(6);
-    
     return results.map(this.mapContentFromDb);
   }
 
-  async getRecommendedContent(userId: number): Promise<Content[]> {
-    // Get content based on user's favorites and progress
-    // For now, return random content similar to favorites
-    const favoriteGenres = await db
-      .select({ genres: content.genres })
-      .from(content)
-      .innerJoin(favorites, eq(content.id, favorites.contentId))
-      .where(eq(favorites.userId, userId))
+  async getRecommendedContent(userId: number) {
+    // Get genres from user's favorite content
+    const favoriteGenres = await db.select({ genres: schema.content.genres })
+      .from(schema.content)
+      .innerJoin(schema.favorites, eq(schema.content.id, schema.favorites.contentId))
+      .where(eq(schema.favorites.userId, userId))
       .limit(3);
     
-    // If user has no favorites, return trending content
     if (favoriteGenres.length === 0) {
       return this.getTrendingContent();
     }
     
-    // Get unique genres from favorites (flattened)
+    // Flatten and deduplicate genres
     const uniqueGenres = [...new Set(favoriteGenres.flatMap(f => f.genres))];
     
-    // Get content that matches any of these genres
-    const results = await db
-      .select()
-      .from(content)
+    // Find content that matches any of the user's favorite genres
+    const results = await db.select().from(schema.content)
       .where(
         or(
           ...uniqueGenres.map(genre => 
-            sql`${content.genres}::text[] && ARRAY[${genre}]::text[]`
+            sql`${schema.content.genres}::text[] && ARRAY[${genre}]::text[]`
           )
         )
       )
@@ -211,40 +160,32 @@ export class DatabaseStorage implements IStorage {
     return results.map(this.mapContentFromDb);
   }
 
-  async getPopularSeries(): Promise<Content[]> {
-    const results = await db
-      .select()
-      .from(content)
-      .where(eq(content.type, "series"))
-      .orderBy(content.rating.desc())
+  async getPopularSeries() {
+    const results = await db.select().from(schema.content)
+      .where(eq(schema.content.type, 'series'))
+      .orderBy(schema.content.rating.desc())
       .limit(6);
-    
     return results.map(this.mapContentFromDb);
   }
 
-  async getLatestMovies(): Promise<Content[]> {
-    const results = await db
-      .select()
-      .from(content)
-      .where(eq(content.type, "movie"))
-      .orderBy(content.releaseYear.desc())
+  async getLatestMovies() {
+    const results = await db.select().from(schema.content)
+      .where(eq(schema.content.type, 'movie'))
+      .orderBy(schema.content.releaseYear.desc())
       .limit(8);
-    
     return results.map(this.mapContentFromDb);
   }
 
-  async searchContent(query: string): Promise<Content[]> {
+  async searchContent(query: string) {
     const lowerQuery = `%${query.toLowerCase()}%`;
     
-    const results = await db
-      .select()
-      .from(content)
+    const results = await db.select().from(schema.content)
       .where(
         or(
-          like(sql`LOWER(${content.title})`, lowerQuery),
-          like(sql`LOWER(${content.description})`, lowerQuery),
+          like(sql`LOWER(${schema.content.title})`, lowerQuery),
+          like(sql`LOWER(${schema.content.description})`, lowerQuery),
           sql`EXISTS (
-            SELECT 1 FROM unnest(${content.genres}) AS genre 
+            SELECT 1 FROM unnest(${schema.content.genres}) AS genre 
             WHERE LOWER(genre) LIKE ${lowerQuery}
           )`
         )
@@ -252,102 +193,98 @@ export class DatabaseStorage implements IStorage {
     
     return results.map(this.mapContentFromDb);
   }
-  
-  async getExclusiveContent(): Promise<Content[]> {
-    const results = await db
-      .select()
-      .from(content)
-      .where(eq(content.isExclusive, true))
+
+  async getExclusiveContent() {
+    const results = await db.select().from(schema.content)
+      .where(eq(schema.content.isExclusive, true))
       .orderBy(sql`RANDOM()`)
       .limit(8);
-    
     return results.map(this.mapContentFromDb);
   }
 
   // User progress related methods
-  async getUserProgress(userId: number): Promise<Progress[]> {
-    const results = await db
-      .select()
-      .from(progress)
-      .where(eq(progress.userId, userId));
+  async getUserProgress(userId: number) {
+    const results = await db.select().from(schema.progress)
+      .where(eq(schema.progress.userId, userId))
+      .orderBy(schema.progress.timestamp.desc());
     
-    return results;
+    // Fetch associated content for each progress item
+    const progressWithContent = await Promise.all(
+      results.map(async (progress) => {
+        const content = await this.getContentById(progress.contentId);
+        return {
+          ...progress,
+          content
+        };
+      })
+    );
+    
+    return progressWithContent;
   }
 
-  async saveUserProgress(progressData: InsertProgress): Promise<Progress> {
-    // Check if progress already exists for this user and content
-    const [existingProgress] = await db
-      .select()
-      .from(progress)
+  async saveUserProgress(progressData: any) {
+    // Check if progress entry already exists
+    const [existingProgress] = await db.select().from(schema.progress)
       .where(
         and(
-          eq(progress.userId, progressData.userId),
-          eq(progress.contentId, progressData.contentId)
+          eq(schema.progress.userId, progressData.userId),
+          eq(schema.progress.contentId, progressData.contentId)
         )
       );
     
     if (existingProgress) {
       // Update existing progress
-      const [updatedProgress] = await db
-        .update(progress)
+      const [updatedProgress] = await db.update(schema.progress)
         .set({
           ...progressData,
           timestamp: new Date()
         })
-        .where(eq(progress.id, existingProgress.id))
+        .where(eq(schema.progress.id, existingProgress.id))
         .returning();
-      
       return updatedProgress;
     } else {
-      // Create new progress
-      const [newProgress] = await db
-        .insert(progress)
+      // Create new progress entry
+      const [newProgress] = await db.insert(schema.progress)
         .values({
           ...progressData,
           timestamp: new Date()
         })
         .returning();
-      
       return newProgress;
     }
   }
 
   // User favorites related methods
-  async getUserFavorites(userId: number): Promise<Content[]> {
-    const userFavorites = await db
-      .select({ contentId: favorites.contentId })
-      .from(favorites)
-      .where(eq(favorites.userId, userId));
+  async getUserFavorites(userId: number) {
+    // Get content IDs from user's favorites
+    const userFavorites = await db.select({ contentId: schema.favorites.contentId })
+      .from(schema.favorites)
+      .where(eq(schema.favorites.userId, userId));
     
     if (userFavorites.length === 0) {
       return [];
     }
     
+    // Get content details for all favorites
     const contentIds = userFavorites.map(f => f.contentId);
-    
-    const results = await db
-      .select()
-      .from(content)
-      .where(inArray(content.id, contentIds));
+    const results = await db.select().from(schema.content)
+      .where(inArray(schema.content.id, contentIds));
     
     return results.map(this.mapContentFromDb);
   }
 
-  async addToFavorites(favorite: InsertFavorite): Promise<void> {
-    // Check if already in favorites
-    const [existingFavorite] = await db
-      .select()
-      .from(favorites)
+  async addToFavorites(favorite: { userId: number, contentId: number }) {
+    // Check if favorite already exists
+    const [existingFavorite] = await db.select().from(schema.favorites)
       .where(
         and(
-          eq(favorites.userId, favorite.userId),
-          eq(favorites.contentId, favorite.contentId)
+          eq(schema.favorites.userId, favorite.userId),
+          eq(schema.favorites.contentId, favorite.contentId)
         )
       );
     
     if (!existingFavorite) {
-      await db
-        .insert(favorites)
+      await db.insert(schema.favorites)
         .values({
           ...favorite,
           addedAt: new Date()
@@ -355,175 +292,153 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async removeFromFavorites(userId: number, contentId: number): Promise<void> {
-    await db
-      .delete(favorites)
+  async removeFromFavorites(userId: number, contentId: number) {
+    await db.delete(schema.favorites)
       .where(
         and(
-          eq(favorites.userId, userId),
-          eq(favorites.contentId, contentId)
+          eq(schema.favorites.userId, userId),
+          eq(schema.favorites.contentId, contentId)
         )
       );
   }
 
-    // Admin content management methods
-  async addContent(contentData: InsertContent): Promise<Content> {
-    const [newContent] = await db
-      .insert(content)
+  // Admin content management methods
+  async addContent(contentData: any) {
+    const [newContent] = await db.insert(schema.content)
       .values(contentData)
       .returning();
-    
     return this.mapContentFromDb(newContent);
   }
-  
-  async updateContent(contentId: number, updateData: Partial<InsertContent>): Promise<Content> {
-    const [updatedContent] = await db
-      .update(content)
+
+  async updateContent(contentId: number, updateData: any) {
+    const [updatedContent] = await db.update(schema.content)
       .set(updateData)
-      .where(eq(content.id, contentId))
+      .where(eq(schema.content.id, contentId))
       .returning();
-    
     return this.mapContentFromDb(updatedContent);
   }
-  
-  async deleteContent(contentId: number): Promise<void> {
-    await db
-      .delete(content)
-      .where(eq(content.id, contentId));
+
+  async deleteContent(contentId: number) {
+    await db.delete(schema.content)
+      .where(eq(schema.content.id, contentId));
   }
-  
+
   // Subscription plan related methods
-  async getAllSubscriptionPlans(): Promise<SubscriptionPlan[]> {
-    const plans = await db
-      .select()
-      .from(subscriptionPlans)
-      .orderBy(subscriptionPlans.price);
-    
+  async getAllSubscriptionPlans() {
+    const plans = await db.select().from(schema.subscriptionPlans)
+      .orderBy(schema.subscriptionPlans.price);
     return plans;
   }
-  
-  async getSubscriptionPlanById(id: number): Promise<SubscriptionPlan | undefined> {
-    const [plan] = await db
-      .select()
-      .from(subscriptionPlans)
-      .where(eq(subscriptionPlans.id, id));
-    
+
+  async getSubscriptionPlanById(id: number) {
+    const [plan] = await db.select().from(schema.subscriptionPlans)
+      .where(eq(schema.subscriptionPlans.id, id));
     return plan;
   }
-  
-  async createSubscriptionPlan(plan: InsertSubscriptionPlan): Promise<SubscriptionPlan> {
-    const [newPlan] = await db
-      .insert(subscriptionPlans)
+
+  async createSubscriptionPlan(plan: any) {
+    const [newPlan] = await db.insert(schema.subscriptionPlans)
       .values(plan)
       .returning();
-    
     return newPlan;
   }
-  
-  async updateSubscriptionPlan(id: number, data: Partial<InsertSubscriptionPlan>): Promise<SubscriptionPlan> {
-    const [updatedPlan] = await db
-      .update(subscriptionPlans)
+
+  async updateSubscriptionPlan(id: number, data: any) {
+    const [updatedPlan] = await db.update(schema.subscriptionPlans)
       .set(data)
-      .where(eq(subscriptionPlans.id, id))
+      .where(eq(schema.subscriptionPlans.id, id))
       .returning();
-    
     return updatedPlan;
   }
-  
-  async deleteSubscriptionPlan(id: number): Promise<void> {
-    await db
-      .delete(subscriptionPlans)
-      .where(eq(subscriptionPlans.id, id));
+
+  async deleteSubscriptionPlan(id: number) {
+    await db.delete(schema.subscriptionPlans)
+      .where(eq(schema.subscriptionPlans.id, id));
   }
-  
+
   // User subscription related methods
-  async getUserSubscription(userId: number): Promise<Subscription | undefined> {
-    const [subscription] = await db
-      .select()
-      .from(subscriptions)
+  async getUserSubscription(userId: number) {
+    const [subscription] = await db.select().from(schema.subscriptions)
       .where(
         and(
-          eq(subscriptions.userId, userId),
-          eq(subscriptions.isActive, true)
+          eq(schema.subscriptions.userId, userId),
+          eq(schema.subscriptions.isActive, true)
         )
       );
-    
     return subscription;
   }
   
-  async createSubscription(subscription: InsertSubscription): Promise<Subscription> {
-    const [newSubscription] = await db
-      .insert(subscriptions)
+  async getSubscriptionById(id: number) {
+    const [subscription] = await db.select().from(schema.subscriptions)
+      .where(eq(schema.subscriptions.id, id));
+    return subscription;
+  }
+
+  async createSubscription(subscription: any) {
+    const [newSubscription] = await db.insert(schema.subscriptions)
       .values(subscription)
       .returning();
     
-    // Update the user's VIP status
-    await this.updateUserVipStatus(
-      subscription.userId, 
-      true, 
-      subscription.endDate
-    );
+    // Update user VIP status if subscription is active
+    if (subscription.isActive) {
+      await this.updateUserVipStatus(
+        subscription.userId,
+        true,
+        subscription.endDate
+      );
+    }
     
     return newSubscription;
   }
-  
-  async updateSubscription(id: number, data: Partial<InsertSubscription>): Promise<Subscription> {
-    const [updatedSubscription] = await db
-      .update(subscriptions)
+
+  async updateSubscription(id: number, data: any) {
+    const [updatedSubscription] = await db.update(schema.subscriptions)
       .set(data)
-      .where(eq(subscriptions.id, id))
+      .where(eq(schema.subscriptions.id, id))
       .returning();
     
-    // If updating isActive status to false, also update user VIP status
+    // Update user VIP status if subscription is inactive
     if (data.isActive === false) {
       await this.updateUserVipStatus(updatedSubscription.userId, false);
     }
     
     return updatedSubscription;
   }
-  
-  async cancelSubscription(id: number): Promise<void> {
-    const [subscription] = await db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.id, id));
+
+  async cancelSubscription(id: number) {
+    const [subscription] = await db.select().from(schema.subscriptions)
+      .where(eq(schema.subscriptions.id, id));
     
     if (subscription) {
-      await db
-        .update(subscriptions)
-        .set({ 
+      await db.update(schema.subscriptions)
+        .set({
           isActive: false,
           autoRenew: false
         })
-        .where(eq(subscriptions.id, id));
+        .where(eq(schema.subscriptions.id, id));
       
-      // Update user VIP status
+      // Remove VIP status from user
       await this.updateUserVipStatus(subscription.userId, false);
     }
   }
-  
+
   // Payment related methods
-  async getUserPayments(userId: number): Promise<Payment[]> {
-    const userPayments = await db
-      .select()
-      .from(payments)
-      .where(eq(payments.userId, userId))
-      .orderBy(payments.createdAt.desc());
-    
+  async getUserPayments(userId: number) {
+    const userPayments = await db.select().from(schema.payments)
+      .where(eq(schema.payments.userId, userId))
+      .orderBy(schema.payments.timestamp.desc());
     return userPayments;
   }
-  
-  async createPayment(payment: InsertPayment): Promise<Payment> {
-    const [newPayment] = await db
-      .insert(payments)
+
+  async createPayment(payment: any) {
+    const [newPayment] = await db.insert(schema.payments)
       .values(payment)
       .returning();
-    
     return newPayment;
   }
-  
-  async updatePaymentStatus(id: number, status: string, transactionId?: string): Promise<Payment> {
-    const updateData: Partial<Payment> = { 
+
+  async updatePaymentStatus(id: number, status: string, transactionId?: string) {
+    const updateData: any = {
       status,
       updatedAt: new Date()
     };
@@ -532,28 +447,21 @@ export class DatabaseStorage implements IStorage {
       updateData.transactionId = transactionId;
     }
     
-    const [updatedPayment] = await db
-      .update(payments)
+    const [updatedPayment] = await db.update(schema.payments)
       .set(updateData)
-      .where(eq(payments.id, id))
+      .where(eq(schema.payments.id, id))
       .returning();
     
-    // If payment is confirmed, update subscription and VIP status
+    // If payment is completed and associated with a subscription, activate the subscription
     if (status === 'completed' && updatedPayment.subscriptionId) {
-      // Get the subscription
-      const [subscription] = await db
-        .select()
-        .from(subscriptions)
-        .where(eq(subscriptions.id, updatedPayment.subscriptionId));
+      const [subscription] = await db.select().from(schema.subscriptions)
+        .where(eq(schema.subscriptions.id, updatedPayment.subscriptionId));
       
       if (subscription) {
-        // Activate the subscription
-        await db
-          .update(subscriptions)
+        await db.update(schema.subscriptions)
           .set({ isActive: true })
-          .where(eq(subscriptions.id, subscription.id));
+          .where(eq(schema.subscriptions.id, subscription.id));
         
-        // Update user VIP status
         await this.updateUserVipStatus(
           updatedPayment.userId,
           true,
@@ -566,8 +474,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Helper method to convert database content to API content format
-  private mapContentFromDb(dbContent: any): Content {
-    // Make sure we handle null values properly
+  mapContentFromDb(dbContent: any) {
     return {
       id: dbContent.id,
       title: dbContent.title,
@@ -593,29 +500,25 @@ export class DatabaseStorage implements IStorage {
   }
 
   // Helper method to seed the database with initial content
-  private async seedDatabase() {
-    // Check if content table is empty
-    const [contentCount] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(content);
-    
-    // Check if subscription plans table is empty
-    const [planCount] = await db
-      .select({ count: sql<number>`count(*)` })
-      .from(subscriptionPlans);
-    
-    // Seed content if needed
-    if (contentCount.count === 0) {
-      await this.seedContentData();
-    }
-    
-    // Seed subscription plans if needed
-    if (planCount.count === 0) {
-      await this.seedSubscriptionPlans();
+  async seedDatabase() {
+    try {
+      // Only seed if database is empty
+      const [contentCount] = await db.select({ count: sql`count(*)` }).from(schema.content);
+      const [planCount] = await db.select({ count: sql`count(*)` }).from(schema.subscriptionPlans);
+      
+      if (parseInt(contentCount.count as string) === 0) {
+        await this.seedContentData();
+      }
+      
+      if (parseInt(planCount.count as string) === 0) {
+        await this.seedSubscriptionPlans();
+      }
+    } catch (error) {
+      console.error('Error seeding database:', error);
     }
   }
-  
-  private async seedSubscriptionPlans() {
+
+  async seedSubscriptionPlans() {
     const plans = [
       {
         name: "Standard VIP",
@@ -623,6 +526,7 @@ export class DatabaseStorage implements IStorage {
         price: 5000, // 5000 XOF
         duration: 30, // 30 jours
         features: ["Contenu exclusif", "Qualité HD", "Recommendations personnalisées"],
+        quality: "HD",
         isActive: true
       },
       {
@@ -631,6 +535,7 @@ export class DatabaseStorage implements IStorage {
         price: 9000, // 9000 XOF
         duration: 30, // 30 jours
         features: ["Contenu exclusif", "Qualité Ultra HD", "Téléchargements illimités", "Sans publicités"],
+        quality: "4K",
         isActive: true
       },
       {
@@ -639,17 +544,15 @@ export class DatabaseStorage implements IStorage {
         price: 15000, // 15000 XOF
         duration: 30, // 30 jours
         features: ["Contenu exclusif", "Qualité Ultra HD", "Téléchargements illimités", "Sans publicités", "Jusqu'à 4 profils"],
+        quality: "4K",
         isActive: true
       }
     ];
     
-    // Insert plans
-    await db.insert(subscriptionPlans).values(plans);
+    await db.insert(schema.subscriptionPlans).values(plans);
   }
-  
-  private async seedContentData() {
-    
-    // Sample content to seed the database
+
+  async seedContentData() {
     const sampleContent = [
       {
         title: "Nebula Odyssey",
@@ -878,9 +781,9 @@ export class DatabaseStorage implements IStorage {
       }
     ];
     
-    // Insert content in batches
-    await db.insert(content).values(sampleContent);
+    await db.insert(schema.content).values(sampleContent);
   }
 }
 
+// Export a singleton instance
 export const storage = new DatabaseStorage();

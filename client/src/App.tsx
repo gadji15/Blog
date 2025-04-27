@@ -1,66 +1,71 @@
-import { Switch, Route } from "wouter";
-import { Toaster } from "@/components/ui/toaster";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import React from 'react';
+import { Route, Switch, Redirect } from 'wouter';
+import { useAuth } from './hooks/use-auth';
 
 // Pages
-import HomePage from "@/pages/home-page";
-import FilmsPage from "@/pages/films-page";
-import SeriesPage from "@/pages/series-page";
-import SearchPage from "@/pages/search-page";
-import ContentDetailsPage from "@/pages/content-details-page";
-import PlayerPage from "@/pages/player-page";
-import AuthPage from "@/pages/auth-page";
-import MyListPage from "@/pages/my-list-page";
-import AdminPage from "@/pages/admin-page";
-import NotFound from "@/pages/not-found";
+import HomePage from './pages/home';
+import NotFound from './pages/not-found';
+import ProfilePage from './pages/profile';
+import ContentPage from './pages/content';
+import SearchPage from './pages/search';
+import MoviesPage from './pages/movies';
+import SeriesPage from './pages/series';
+import AuthPage from './pages/auth';
+import PlansPage from './pages/plans';
+import AdminPage from './pages/admin';
 
-// Legal Pages
-import TermsPage from "@/pages/legal/terms-page";
-import PrivacyPage from "@/pages/legal/privacy-page";
-import CookiesPage from "@/pages/legal/cookies-page";
+// Components
+import { MainLayout } from './components/layouts/main-layout';
 
-// Layout
-import Header from "@/components/layout/header";
-import Footer from "@/components/layout/footer";
+// Route guard
+const PrivateRoute = ({ component: Component, adminOnly = false, ...rest }: any) => {
+  const { isAuthenticated, isAdmin } = useAuth();
+  
+  if (!isAuthenticated) {
+    return <Redirect to="/login" />;
+  }
+  
+  if (adminOnly && !isAdmin) {
+    return <Redirect to="/" />;
+  }
+  
+  return <Component {...rest} />;
+};
 
-// Protected Routes
-import { ProtectedRoute } from "@/lib/protected-route";
-
-function Router() {
+export default function App() {
   return (
-    <Switch>
-      <Route path="/" component={HomePage} />
-      <Route path="/films" component={FilmsPage} />
-      <Route path="/series" component={SeriesPage} />
-      <Route path="/search" component={SearchPage} />
-      <Route path="/content/:id" component={ContentDetailsPage} />
-      <Route path="/player/:id" component={PlayerPage} />
-      <Route path="/auth" component={AuthPage} />
-      <ProtectedRoute path="/my-list" component={MyListPage} />
-      <ProtectedRoute path="/admin" component={AdminPage} />
-      
-      {/* Legal Pages */}
-      <Route path="/terms" component={TermsPage} />
-      <Route path="/privacy" component={PrivacyPage} />
-      <Route path="/cookies" component={CookiesPage} />
-      
-      {/* Fallback to 404 */}
-      <Route component={NotFound} />
-    </Switch>
+    <MainLayout>
+      <Switch>
+        <Route path="/" component={HomePage} />
+        <Route path="/login">
+          <AuthPage mode="login" />
+        </Route>
+        <Route path="/register">
+          <AuthPage mode="register" />
+        </Route>
+        <Route path="/profile">
+          <PrivateRoute component={ProfilePage} />
+        </Route>
+        <Route path="/content/:id">
+          {(params) => <ContentPage id={parseInt(params.id)} />}
+        </Route>
+        <Route path="/search">
+          <SearchPage />
+        </Route>
+        <Route path="/movies">
+          <MoviesPage />
+        </Route>
+        <Route path="/series">
+          <SeriesPage />
+        </Route>
+        <Route path="/plans">
+          <PlansPage />
+        </Route>
+        <Route path="/admin">
+          <PrivateRoute component={AdminPage} adminOnly={true} />
+        </Route>
+        <Route component={NotFound} />
+      </Switch>
+    </MainLayout>
   );
 }
-
-function App() {
-  return (
-    <TooltipProvider>
-      <Header />
-      <main className="min-h-screen pt-20">
-        <Router />
-      </main>
-      <Footer />
-      <Toaster />
-    </TooltipProvider>
-  );
-}
-
-export default App;
