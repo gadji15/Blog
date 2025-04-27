@@ -176,6 +176,32 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // User profile routes
+  app.put("/api/user/profile", ensureAuthenticated, async (req, res, next) => {
+    try {
+      const { firstName, lastName, email } = req.body;
+      
+      // Vérifier si l'email est déjà utilisé par un autre utilisateur
+      if (email && email !== req.user.email) {
+        const existingUser = await storage.getUserByEmail(email);
+        if (existingUser && existingUser.id !== req.user.id) {
+          return res.status(400).json({ message: "Email already in use" });
+        }
+      }
+      
+      const updatedUser = await storage.updateUserProfile(req.user.id, {
+        firstName, 
+        lastName,
+        email
+      });
+      
+      const { password, ...safeUser } = updatedUser;
+      res.json(safeUser);
+    } catch (error) {
+      next(error);
+    }
+  });
+
   // Favorites routes
   app.get("/api/favorites", ensureAuthenticated, async (req, res, next) => {
     try {
@@ -299,7 +325,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/user/subscription", ensureAuthenticated, async (req, res, next) => {
     try {
       const subscription = await storage.getUserSubscription(req.user.id);
-      res.json(subscription || { active: false });
+      
+      // Si l'abonnement existe, récupérer les détails du plan
+      if (subscription) {
+        const plan = await storage.getSubscriptionPlanById(subscription.planId);
+        return res.json({
+          ...subscription,
+          plan
+        });
+      }
+      
+      res.json({ active: false });
     } catch (error) {
       next(error);
     }
@@ -407,6 +443,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       if (!subscriptionId) {
         return res.status(400).json({ message: "Subscription ID is required" });
+      }
+      
+      // Vérifier que l'abonnement appartient bien à l'utilisateur
+      const subscription = await storage.getSubscriptionById(subscriptionId);
+      if (!subscription || subscription.userId !== req.user.id) {
+        return res.status(403).json({ message: "You don't have permission to cancel this subscription" });
       }
       
       await storage.cancelSubscription(subscriptionId);
