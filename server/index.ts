@@ -43,8 +43,9 @@ app.use((req, res, next) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";
 
+    console.error(err);
     res.status(status).json({ message });
-    throw err;
+    // Removed the "throw err" line to prevent crashing the server after sending a response
   });
 
   // importantly only setup vite in development and after
